@@ -1,0 +1,127 @@
+# syntax=docker/dockerfile:1.7
+# Builds Presenton from source (https://github.com/presenton/presenton)
+
+# ── Stage 0: Clone repo ────────────────────────────────────────────────────
+FROM alpine/git AS source
+RUN git clone --depth=1 https://github.com/presenton/presenton.git /repo
+
+# ── Stage 1: FastAPI builder ───────────────────────────────────────────────
+FROM python:3.11-slim-bookworm AS fastapi-builder
+
+WORKDIR /app/servers/fastapi
+
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy
+
+RUN python -m venv --without-pip /opt/venv \
+    && pip install --no-cache-dir uv
+
+COPY --from=source /repo/servers/fastapi/pyproject.toml /repo/servers/fastapi/uv.lock ./
+RUN uv export --frozen --no-dev --no-emit-project -o /tmp/requirements.txt \
+    && uv pip install --python /opt/venv/bin/python -r /tmp/requirements.txt
+
+COPY --from=source /repo/servers/fastapi /app/servers/fastapi
+RUN uv pip install --python /opt/venv/bin/python --no-deps .
+
+RUN uv pip install --python /opt/venv/bin/python \
+    "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl"
+
+ENV HF_HOME=/root/.cache/huggingface \
+    PRESENTON_FASTEMBED_ICON_CACHE_DIR=/root/.cache/presenton/fastembed-icons
+
+# Create cache dirs so the runtime COPY steps don't fail when warm cache was skipped
+RUN mkdir -p /root/.cache/huggingface /root/.cache/presenton/fastembed-icons
+
+# ── Stage 2: Next.js builder ───────────────────────────────────────────────
+FROM node:20-bookworm-slim AS nextjs-builder
+
+WORKDIR /app/servers/nextjs
+ENV NEXT_TELEMETRY_DISABLED=1
+
+COPY --from=source /repo/servers/nextjs/package.json /repo/servers/nextjs/package-lock.json ./
+RUN npm ci
+
+COPY --from=source /repo/servers/nextjs /app/servers/nextjs
+RUN npm run build && rm -rf .next-build/cache
+
+# ── Stage 3: Assets builder ────────────────────────────────────────────────
+FROM node:20-bookworm-slim AS assets-builder
+
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=source /repo/package.json /app/
+RUN mkdir -p /app/document-extraction-liteparse \
+    && npm --prefix /app/document-extraction-liteparse init -y \
+    && npm --prefix /app/document-extraction-liteparse install @llamaindex/liteparse@1.4.0 --omit=dev
+
+COPY --from=source /repo/electron/resources/document-extraction/liteparse_runner.mjs \
+    /app/document-extraction-liteparse/liteparse_runner.mjs
+COPY --from=source /repo/scripts/sync-presentation-export.cjs \
+    /app/scripts/sync-presentation-export.cjs
+
+RUN rm -rf /app/presentation-export \
+    && node /app/scripts/sync-presentation-export.cjs --force \
+    && chmod +x /app/presentation-export/py/convert-linux-x64 \
+    && cd /app/presentation-export \
+    && npm init -y \
+    && npm install "sharp@^0.34.5" --include=optional --omit=dev --no-fund --no-audit --no-package-lock
+
+# ── Stage 4: Runtime ───────────────────────────────────────────────────────
+FROM python:3.11-slim-bookworm AS runtime
+
+WORKDIR /app
+
+ENV APP_DATA_DIRECTORY=/app_data \
+    TEMP_DIRECTORY=/tmp/presenton \
+    EXPORT_PACKAGE_ROOT=/app/presentation-export \
+    EXPORT_RUNTIME_DIR=/app/presentation-export \
+    BUILT_PYTHON_MODULE_PATH=/app/presentation-export/py/convert-linux-x64 \
+    PRESENTON_APP_ROOT=/app \
+    HF_HOME=/root/.cache/huggingface \
+    PRESENTON_FASTEMBED_ICON_CACHE_DIR=/root/.cache/presenton/fastembed-icons \
+    PATH="/opt/venv/bin:${PATH}" \
+    NODE_ENV=production \
+    START_OLLAMA=false \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+      ca-certificates curl nginx fontconfig imagemagick zstd chromium \
+      fonts-liberation \
+      libasound2 libatk-bridge2.0-0 libatk1.0-0 libatspi2.0-0 \
+      libcairo2 libcups2 libdbus-1-3 libdrm2 libexpat1 libgbm1 \
+      libglib2.0-0 libgtk-3-0 libnspr4 libnss3 libpango-1.0-0 \
+      libx11-6 libxcb1 libxcomposite1 libxdamage1 libxext6 libxfixes3 \
+      libxkbcommon0 libxrandr2 libxss1 libxtst6 \
+      tesseract-ocr tesseract-ocr-eng; \
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash -; \
+    apt-get install -y --no-install-recommends nodejs; \
+    rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /app/scripts /app/servers/fastapi /app/servers/nextjs \
+    && mkdir -p /app_data/exports /app_data/images /app_data/uploads /app_data/fonts /app_data/pptx-to-html \
+    && chmod -R a+rX /app_data
+
+COPY --from=fastapi-builder /opt/venv /opt/venv
+COPY --from=fastapi-builder /app/servers/fastapi /app/servers/fastapi
+COPY --from=fastapi-builder /root/.cache/huggingface /root/.cache/huggingface
+COPY --from=fastapi-builder /root/.cache/presenton/fastembed-icons /root/.cache/presenton/fastembed-icons
+
+COPY --from=assets-builder /app/package.json /app/package.json
+COPY --from=assets-builder /app/document-extraction-liteparse /app/document-extraction-liteparse
+COPY --from=assets-builder /app/presentation-export /app/presentation-export
+COPY --from=assets-builder /app/scripts/sync-presentation-export.cjs /app/scripts/sync-presentation-export.cjs
+
+COPY --from=nextjs-builder /app/servers/nextjs/.next-build/standalone/ /app/servers/nextjs/
+COPY --from=nextjs-builder /app/servers/nextjs/public /app/servers/nextjs/public
+COPY --from=nextjs-builder /app/servers/nextjs/.next-build/static /app/servers/nextjs/.next-build/static
+
+COPY --from=source /repo/start.js /repo/LICENSE /repo/NOTICE ./
+COPY --from=source /repo/scripts/presenton-terminal-banner.mjs /app/scripts/presenton-terminal-banner.mjs
+COPY --from=source /repo/nginx.conf /etc/nginx/nginx.conf
+
+EXPOSE 80
+CMD ["node", "/app/start.js"]

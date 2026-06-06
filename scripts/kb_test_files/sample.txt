@@ -1,0 +1,3 @@
+OpenBI is a business intelligence platform.
+It supports multiple data sources and AI agents.
+Dashboards can be exported as PDF or PPTX.

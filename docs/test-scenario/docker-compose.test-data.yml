@@ -1,0 +1,60 @@
+# Overlay compose file: brings up two seeded SQL databases on the OpenBI network
+# so MindsDB (running inside the same network) can reach them by hostname.
+#
+# Run from the project root:
+#   docker compose -f docker-compose.yml -f docs/test-scenario/docker-compose.test-data.yml up -d
+#
+# Hostnames seen by MindsDB / backend:
+#   retail-pg    (Postgres 16, db=retail, user=retail, password=retail123)
+#   hr-mysql     (MySQL 8.4,  db=hr,     user=hr,     password=hr123)
+
+services:
+  retail-pg:
+    image: postgres:16-alpine
+    container_name: openbi-retail-pg
+    environment:
+      POSTGRES_DB: retail
+      POSTGRES_USER: retail
+      POSTGRES_PASSWORD: retail123
+    ports:
+      - "55432:5432"          # host-side port for ad-hoc psql / DBeaver checks
+    volumes:
+      - retail_pg_data:/var/lib/postgresql/data
+      - ./seed/postgres-retail.sql:/docker-entrypoint-initdb.d/01-retail.sql:ro
+    networks:
+      - openbi-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U retail -d retail"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  hr-mysql:
+    image: mysql:8.4
+    container_name: openbi-hr-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpw
+      MYSQL_DATABASE: hr
+      MYSQL_USER: hr
+      MYSQL_PASSWORD: hr123
+    ports:
+      - "53306:3306"
+    volumes:
+      - hr_mysql_data:/var/lib/mysql
+      - ./seed/mysql-hr.sql:/docker-entrypoint-initdb.d/01-hr.sql:ro
+    networks:
+      - openbi-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "hr", "-phr123"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+networks:
+  openbi-network:
+    external: true
+    name: openbi_openbi-network   # default name when project dir is "openbi"
+
+volumes:
+  retail_pg_data:
+  hr_mysql_data:

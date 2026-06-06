@@ -1,0 +1,23 @@
+services:
+  test-mariadb:
+    image: mariadb:10.11
+    container_name: openbi-test-mariadb
+    ports:
+      - "3307:3306"
+    environment:
+      - MARIADB_ROOT_PASSWORD=root123
+      - MARIADB_DATABASE=testdb
+      - MARIADB_USER=mariadb
+      - MARIADB_PASSWORD=mariadb123
+    networks:
+      - openbi-network
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  openbi-network:
+    external: true
+    name: openbi_openbi-network

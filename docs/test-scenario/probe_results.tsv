@@ -1,0 +1,24 @@
+web	PASS	2026-06-05T15:42:31Z	{"status":"success"}
+hackernews	PASS	2026-06-05T15:42:33Z	{"status":"success"}
+mediawiki	PASS	2026-06-05T15:42:34Z	{"status":"success"}
+postgres	PASS	2026-06-05T15:42:42Z	{"status":"success"}
+supabase	PASS	2026-06-05T15:42:49Z	{"status":"success"}
+clickhouse	PASS	2026-06-05T15:43:03Z	{"status":"success"}
+mysql	PASS	2026-06-05T15:43:22Z	{"status":"success"}
+mongodb	FAIL	2026-06-05T15:43:30Z	{"status":"connection_error","detail":"Database testdb not found!"}
+mongodb	PASS	2026-06-05T15:44:01Z	{"status":"success"}
+mariadb	PASS	2026-06-05T15:44:26Z	{"status":"success"}
+timescaledb	PASS	2026-06-05T15:45:47Z	{"status":"success"}
+cockroachdb	PASS	2026-06-05T15:45:55Z	{"status":"success"}
+dynamodb	FAIL	2026-06-05T15:50:10Z	{"status":"connection_error","detail":"Required parameters (aws_access_key_id, aws_secret_access_key, region_name) must be provided."}
+materialize	PASS	2026-06-05T15:50:59Z	{"status":"success"}
+dynamodb	FAIL	2026-06-05T15:55:37Z	{"status":"connection_error","detail":"An error occurred (UnrecognizedClientException) when calling the ListTables operation: The security token included in the request is invalid."}
+influxdb	FAIL	2026-06-05T15:55:39Z	{"status":"connection_error","detail":"Handler 'influxdb' cannot be imported: No module named 'influxdb_client_3'"}
+questdb	FAIL	2026-06-05T15:56:07Z	{"status":"connection_error","detail":"Handler 'questdb' cannot be imported: No module named 'questdb'"}
+surrealdb	FAIL	2026-06-05T15:56:22Z	{"status":"connection_error","detail":"Handler 'surrealdb' cannot be imported: No module named 'pysurrealdb'"}
+crate	FAIL	2026-06-05T15:57:00Z	{"status":"connection_error","detail":"Handler 'crate' cannot be imported: No module named 'sqlalchemy_cratedb'"}
+elasticsearch	FAIL	2026-06-05T16:01:14Z	{"status":"connection_error","detail":"Either the hosts or cloud_id parameter should be provided!"}
+solr	FAIL	2026-06-05T16:06:02Z	{"status":"connection_error","detail":"Can't load plugin: sqlalchemy.dialects:solr"}
+elasticsearch	FAIL	2026-06-05T16:10:03Z	{"status":"connection_error","detail":"URL must include a 'scheme', 'host', and 'port' component (ie 'https://localhost:9200')"}
+trino	FAIL	2026-06-05T17:56:43Z	no-response (timeout)
+yugabyte	FAIL	2026-06-05T18:00:27Z	no-response (timeout)

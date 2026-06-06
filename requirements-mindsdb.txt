@@ -1,0 +1,93 @@
+# MindsDB handler dependencies (installed on top of the base mindsdb image).
+# Kept here rather than hardcoded in Dockerfile.mindsdb so the supported
+# connector set is reviewable/maintainable in one place.
+#
+# NOTE: these are installed in the MindsDB sidecar container, NOT the backend
+# app (whose deps live in pyproject.toml).
+#
+# Packages with native C deps (pymssql, ibm_db, hdbcli) are handled
+# separately in Dockerfile.mindsdb with best-effort installs.
+
+# ── Core handlers + KB web crawl ─────────────────────────────────────────────
+pymongo
+clickhouse-sqlalchemy
+clickhouse-driver
+elasticsearch<9
+influxdb-client
+chromadb
+mindsdb[web]
+
+# ── Relational databases ──────────────────────────────────────────────────────
+mysql-connector-python
+oracledb                            # Oracle — pure-Python thin mode, no Oracle Client needed
+scylla-driver                       # Cassandra + ScyllaDB (drop-in cassandra-driver replacement)
+duckdb                              # DuckDB
+cloud-sql-python-connector[pg8000]  # Google Cloud SQL
+google-cloud-spanner                # Cloud Spanner
+pydruid                             # Apache Druid
+impyla                              # Apache Impala
+vertica-python
+teradatasql
+teradatasqlalchemy
+crate[sqlalchemy]                   # CrateDB
+fauna                               # FaunaDB
+surrealdb
+
+# ── AWS (DynamoDB, S3, Redshift share boto3) ──────────────────────────────────
+boto3
+
+# ── Cloud data warehouses ─────────────────────────────────────────────────────
+snowflake-connector-python[pandas]
+snowflake-sqlalchemy
+google-cloud-bigquery[pandas]
+sqlalchemy-bigquery
+databricks-sql-connector>=3.7.1,<4.0.0
+trino~=0.313.0
+pyhive                              # Apache Hive (needs libsasl2-dev — installed in Dockerfile)
+thrift
+thrift-sasl
+
+# ── File / cloud storage ──────────────────────────────────────────────────────
+google-cloud-storage
+gcsfs                               # GCS handler needs fsspec/gcsfs
+azure-storage-blob
+dropbox
+
+# ── SaaS connectors ───────────────────────────────────────────────────────────
+stripe
+slack-sdk
+PyGithub
+tweepy                              # Twitter / X
+notion-client
+atlassian-python-api                # Jira + Confluence handlers both use this
+salesforce-api                      # Salesforce (salesforce_api on PyPI)
+ShopifyAPI
+google-analytics-admin              # Google Analytics handler
+hubspot-api-client
+plaid-python
+twilio
+praw                                # Reddit
+binance-connector                   # Binance (official connector, not python-binance)
+questdb                             # QuestDB
+taospy==2.7.16                      # TDengine — 2.7.x ships taosrest (REST connector); 2.2.x only had native taos
+sqlalchemy-solr                     # Apache Solr
+
+# ── SaaS connectors already handled in Dockerfile.mindsdb ────────────────────
+# msal                              → Microsoft (Teams / OneDrive / SharePoint)
+# python-gitlab                     → GitLab
+# coinbase-advanced-py              → Coinbase
+# newsapi-python                    → NewsAPI
+# google-api-python-client          → Sheets, Gmail, YouTube, Calendar, Search
+# sib-api-v3-sdk                    → Sendinblue/Brevo
+# mediawikiapi                      → Wikipedia
+# rocketchat-API-python             → Rocket.Chat
+
+# ── Vector stores ─────────────────────────────────────────────────────────────
+pymilvus
+lancedb
+lance
+qdrant-client
+pgvector
+weaviate-client
+pinecone-client
+couchbase

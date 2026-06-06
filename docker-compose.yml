@@ -1,0 +1,116 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    env_file: .env
+    depends_on:
+      mindsdb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - openbi-network
+    volumes:
+      - uploads:/app/uploads
+      - ./backend:/app/backend
+      - ./report_templates:/app/report_templates
+      - presenton_data:/app/presenton_data
+    environment:
+      PRESENTON_USERNAME: ${PRESENTON_USERNAME:-openbi}
+      PRESENTON_PASSWORD: ${PRESENTON_PASSWORD:-openbi_pptx_2024}
+    command: uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../Dockerfile.frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    environment:
+      VITE_API_URL: ""
+      VITE_WS_URL: "ws://localhost:8000"
+      API_PROXY_TARGET: "http://backend:8000"
+      WS_PROXY_TARGET: "ws://backend:8000"
+      PRESENTON_PROXY_TARGET: "http://presenton:80"
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/index.html:/app/index.html
+    networks:
+      - openbi-network
+
+  mindsdb:
+    build:
+      context: .
+      dockerfile: Dockerfile.mindsdb
+    expose:
+      - "47334"
+    environment:
+      MINDSDB_APIS: "http"
+      MINDSDB_API_HTTP_HOST: "0.0.0.0"
+    volumes:
+      - mindsdb_data:/root/mindsdb_storage
+    networks:
+      - openbi-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:47334/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  redis:
+    image: redis:7-alpine
+    expose:
+      - "6379"
+    networks:
+      - openbi-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  presenton:
+    build:
+      context: .
+      dockerfile: Dockerfile.presenton
+    ports:
+      - "127.0.0.1:7771:80"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      LLM: ${PRESENTON_LLM_PROVIDER:-google}
+      AUTH_USERNAME: ${PRESENTON_USERNAME:-openbi}
+      AUTH_PASSWORD: ${PRESENTON_PASSWORD:-openbi_pptx_2024}
+      DISABLE_AUTH: "true"
+    volumes:
+      - presenton_data:/app_data
+    networks:
+      - openbi-network
+
+  telegram_bot:
+    build:
+      context: .
+      dockerfile: telegram_bot/Dockerfile.telegram
+    env_file: .env
+    environment:
+      API_BASE_URL: "http://backend:8000"
+    depends_on:
+      - backend
+    networks:
+      - openbi-network
+
+networks:
+  openbi-network:
+    driver: bridge
+
+volumes:
+  mindsdb_data:
+  uploads:
+  presenton_data:

@@ -1,0 +1,61 @@
+FROM mindsdb/mindsdb:latest
+
+# System libraries required by handlers with C extensions.
+# freetds-*   → pymssql (MS SQL Server)
+# libsasl2-*  → thrift-sasl (Apache Hive / Trino)
+# unixodbc-*  → pyodbc fallback (optional but keeps odbc-based handlers buildable)
+RUN apt-get update -qq && apt-get install -y --no-install-recommends \
+    freetds-dev freetds-bin \
+    libsasl2-dev libsasl2-modules \
+    unixodbc-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# All pip-installable handler dependencies (see requirements-mindsdb.txt for
+# the full list, organised by category).
+COPY requirements-mindsdb.txt /tmp/requirements-mindsdb.txt
+RUN pip install -r /tmp/requirements-mindsdb.txt --quiet --no-cache-dir
+
+# Packages that need the system libs installed above — best-effort so a build
+# failure of one connector never blocks the whole image.
+RUN pip install pymssql --quiet --no-cache-dir \
+    || echo "pymssql skipped (FreeTDS build error)"
+
+# IBM Db2 (needs ibm_db system libs — not available in all base images)
+RUN pip install ibm_db ibm-db-sa --quiet --no-cache-dir \
+    || echo "IBM Db2 driver skipped (system libs missing)"
+
+# SAP HANA (hdbcli is a proprietary binary wheel — may not exist for this arch)
+RUN pip install hdbcli --quiet --no-cache-dir \
+    || echo "SAP HANA driver skipped"
+
+# SaaS connectors that didn't fit neatly in requirements.txt
+RUN pip install msal --quiet --no-cache-dir \
+    || echo "msal skipped"
+RUN pip install python-gitlab --quiet --no-cache-dir \
+    || echo "python-gitlab skipped"
+RUN pip install coinbase-advanced-py --quiet --no-cache-dir \
+    || echo "coinbase-advanced-py skipped"
+RUN pip install newsapi-python --quiet --no-cache-dir \
+    || echo "newsapi skipped"
+RUN pip install google-api-python-client --quiet --no-cache-dir \
+    || echo "google-api-python-client skipped"
+RUN pip install sib-api-v3-sdk --quiet --no-cache-dir \
+    || echo "sib-api-v3-sdk skipped"
+RUN pip install mediawikiapi --quiet --no-cache-dir \
+    || echo "mediawikiapi skipped"
+RUN pip install rocketchat-API-python --quiet --no-cache-dir \
+    || echo "rocketchat skipped"
+
+# Vertex AI / Gemini cap embedding batches at 100 inputs per BatchEmbedContents
+# request, but MindsDB's KB embedding client batches at a hardcoded 1000
+# (interfaces/knowledge_base/llm_client.py -> @run_in_batches(1000)). Ingesting any
+# source that yields >100 chunks then 400s: "at most 100 requests can be in one
+# batch". Make the embed batch size env-configurable (default 100) so KB ingestion
+# stays under provider limits across every path (uploads, crawl jobs, agents). The
+# grep guard fails the build loudly if a MindsDB upgrade moves/renames this code.
+ENV KB_EMBED_BATCH_SIZE=50
+RUN KB_LLM_CLIENT="$(find / -path '*/mindsdb/interfaces/knowledge_base/llm_client.py' 2>/dev/null | head -1)" \
+    && test -n "$KB_LLM_CLIENT" \
+    && sed -i 's/@run_in_batches(1000)/@run_in_batches(int(os.getenv("KB_EMBED_BATCH_SIZE", "50")))/' "$KB_LLM_CLIENT" \
+    && grep -q 'KB_EMBED_BATCH_SIZE' "$KB_LLM_CLIENT" \
+    && echo "Patched KB embed batch size -> KB_EMBED_BATCH_SIZE (default 100) in $KB_LLM_CLIENT"

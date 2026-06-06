@@ -1,0 +1,22 @@
+services:
+  test-mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: openbi-test-mssql
+    ports:
+      - "1433:1433"
+    environment:
+      - ACCEPT_EULA=Y
+      - MSSQL_SA_PASSWORD=SuperSecret123!
+      - MSSQL_PID=Developer
+    networks:
+      - openbi-network
+    healthcheck:
+      test: ["CMD", "/opt/mssql-tools18/bin/sqlcmd", "-S", "localhost", "-U", "SA", "-P", "SuperSecret123!", "-Q", "SELECT 1", "-No"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  openbi-network:
+    external: true
+    name: openbi_openbi-network

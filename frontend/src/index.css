@@ -1,0 +1,259 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-primary: #2563eb;
+  --color-brand-secondary: #4f46e5;
+  
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+
+  --animate-fade-in: fade-in 0.4s ease-out;
+  --animate-fade-up: fade-up 0.5s ease-out;
+  --animate-slide-in-right: slide-in-right 0.3s ease-out;
+  
+  --radius-xl: 0.75rem;
+  --radius-2xl: 1rem;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(10px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/* ── Base styles ── */
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Make native controls (date pickers, <select> dropdowns, scrollbars,
+   autofill) render with the correct light/dark palette instead of the
+   browser's default light chrome. */
+:root { color-scheme: light; }
+.dark { color-scheme: dark; }
+
+/* Consistent keyboard focus ring across the app */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-brand-primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Branded text selection */
+::selection {
+  background: color-mix(in srgb, var(--color-brand-primary) 30%, transparent);
+}
+
+/* Light mode */
+:root {
+  --bg-primary: #fafafa;
+  --bg-secondary: #ffffff;
+  --bg-card: rgba(255, 255, 255, 0.9);
+  
+  --text-primary: #171717;
+  --text-secondary: #737373;
+  --text-muted: #a3a3a3;
+  
+  --border-color: #e5e5e5;
+  --border-highlight: #f5f5f5;
+  
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -4px rgba(0, 0, 0, 0.05);
+  --shadow-glow: 0 0 0 transparent; /* Removed glow */
+  
+  --glass-bg: rgba(255, 255, 255, 0.7);
+  
+  --btn-primary-bg: #171717;
+  --btn-primary-text: #ffffff;
+  --btn-primary-hover: #262626;
+}
+
+/* Dark mode */
+.dark {
+  --bg-primary: #0a0a0a;
+  --bg-secondary: #161616;
+  --bg-card: rgba(26, 26, 26, 0.85);
+
+  /* Contrast tuned for WCAG AA on the #0a0a0a background:
+     primary ~16:1, secondary ~8.9:1, muted ~5.6:1 (was #525252 ≈ 3.4:1, failing AA) */
+  --text-primary: #f5f5f5;
+  --text-secondary: #c2c2c2;
+  --text-muted: #8c8c8c;
+
+  --border-color: #2e2e2e;
+  --border-highlight: #3d3d3d;
+  
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 10px 20px -3px rgba(0, 0, 0, 0.5);
+  --shadow-glow: 0 0 0 transparent; /* Removed glow */
+  
+  --glass-bg: rgba(18, 18, 18, 0.6);
+  
+  --btn-primary-bg: #ededed;
+  --btn-primary-text: #171717;
+  --btn-primary-hover: #d4d4d4;
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+/* ── Utility classes ── */
+
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-sm);
+}
+
+.gradient-primary {
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-text);
+}
+
+.gradient-text {
+  background: none;
+  -webkit-background-clip: unset;
+  -webkit-text-fill-color: unset;
+  background-clip: unset;
+  color: var(--text-primary);
+}
+
+.gradient-orb {
+  display: none; /* Disable orbs */
+}
+
+.card {
+  background: var(--bg-card);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border-color);
+  border-radius: 0.75rem;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.2s ease;
+}
+
+.card:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+  border-color: var(--border-highlight);
+}
+
+.panel {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 0.5rem;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { 
+  background: var(--border-color); 
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* ── AG Grid theme overrides ── */
+.ag-theme-alpine {
+  --ag-background-color: transparent !important;
+  --ag-foreground-color: var(--text-primary) !important;
+  --ag-header-background-color: var(--bg-secondary) !important;
+  --ag-border-color: var(--border-color) !important;
+  --ag-row-hover-color: var(--bg-secondary) !important;
+  --ag-row-border-color: var(--border-color) !important;
+  --ag-header-foreground-color: var(--text-secondary) !important;
+}
+
+/* ── Gridstack ── */
+.grid-stack > .grid-stack-item > .grid-stack-item-content {
+  overflow: hidden;
+  border-radius: 0.75rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-sm);
+}
+
+/* ── Print Media Styles ── */
+@media print {
+  /* Hide sidebar, topbar, headers, chat UI, buttons, and drawers */
+  aside,
+  header,
+  nav,
+  button,
+  .no-print,
+  .dashboard-chat-container,
+  .chat-trigger-button,
+  [role="dialog"],
+  .fixed,
+  .absolute:not(.grid-stack-item),
+  .h-20.flex.items-center {
+    display: none !important;
+  }
+
+  /* Reset layout structure for printing */
+  html, body, #root, main, .flex, .flex-col, .h-screen {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+  }
+
+  /* Make the main grid content take full width */
+  main {
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+  }
+
+  /* Gridstack print styles */
+  .grid-stack {
+    height: auto !important;
+    overflow: visible !important;
+    width: 100% !important;
+  }
+  
+  .grid-stack-item {
+    page-break-inside: avoid !important;
+  }
+
+  .grid-stack-item-content {
+    border: 1px solid var(--border-color) !important;
+    background: #ffffff !important;
+    box-shadow: none !important;
+    overflow: visible !important;
+  }
+
+  /* Ensure canvases scale correctly */
+  canvas {
+    max-width: 100% !important;
+    height: auto !important;
+  }
+}
+
