@@ -71,6 +71,8 @@ RUN rm -rf /app/presentation-export \
 # ── Stage 4: Runtime ───────────────────────────────────────────────────────
 FROM python:3.11-slim-bookworm AS runtime
 
+LABEL org.opencontainers.image.source=https://github.com/narender-rk10/OpenBI
+
 WORKDIR /app
 
 ENV APP_DATA_DIRECTORY=/app_data \

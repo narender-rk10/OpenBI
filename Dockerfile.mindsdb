@@ -1,5 +1,7 @@
 FROM mindsdb/mindsdb:latest
 
+LABEL org.opencontainers.image.source=https://github.com/narender-rk10/OpenBI
+
 # System libraries required by handlers with C extensions.
 # freetds-*   → pymssql (MS SQL Server)
 # libsasl2-*  → thrift-sasl (Apache Hive / Trino)

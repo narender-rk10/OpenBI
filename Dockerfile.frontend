@@ -1,5 +1,7 @@
 FROM node:20-alpine
 
+LABEL org.opencontainers.image.source=https://github.com/narender-rk10/OpenBI
+
 WORKDIR /app
 
 COPY package.json package-lock.json* ./

@@ -243,7 +243,7 @@ async def add_widget(
     existing = await db.widgets.count_documents({"dashboard_id": ObjectId(dashboard_id)})
     widget_id = f"w{existing + 1}"
 
-    # If from chat, copy cached data
+    # If from chat, copy cached data + chart_config from the source message
     cached_data = None
     if body.source_type == "chat" and body.source_session_id and body.source_message_id:
         session = await db.chat_sessions.find_one({"_id": ObjectId(body.source_session_id)})
@@ -257,6 +257,30 @@ async def add_widget(
                 }
                 if not body.chart_config and msg.get("chart_config"):
                     body.chart_config = msg["chart_config"]
+
+    # For non-chat widgets with a SQL query, execute now so the widget has data on first load
+    if not cached_data:
+        sql_query = body.data_binding.get("query") if isinstance(body.data_binding, dict) else None
+        if sql_query:
+            try:
+                result = await mindsdb.sql_query(sql_query)
+                columns = result.get("column_names", [])
+                rows = result.get("data", [])
+                if columns:
+                    cached_data = {"columns": columns, "rows": rows, "fetched_at": datetime.now(timezone.utc)}
+            except Exception:
+                pass
+
+    # Auto-generate chart_config if widget is chart type and we have data but no config yet
+    if cached_data and body.display_type == "chart" and not body.chart_config:
+        try:
+            org = await db.organizations.find_one({})
+            brand_colors = org.get("settings", {}).get("branding", {}).get("chart_palette") if org else None
+            body.chart_config = await chart_agent.generate_chart(
+                cached_data["columns"], cached_data["rows"], "auto", brand_colors
+            )
+        except Exception:
+            pass
 
     widget_doc = {
         "dashboard_id": ObjectId(dashboard_id),

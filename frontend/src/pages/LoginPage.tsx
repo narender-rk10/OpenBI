@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { BarChart3, Mail, Lock, AlertCircle, Sun, Moon, ArrowLeft } from 'lucide-react'
+import { ChartColumn, Mail, Lock, AlertCircle, Sun, Moon, ArrowLeft } from 'lucide-react'
 import { useAuth } from '../lib/auth'
 import { useTheme } from '../lib/theme'
 
@@ -60,7 +60,7 @@ export default function LoginPage() {
         {/* Header */}
         <div className="flex flex-col items-center mb-8">
           <div className="w-12 h-12 rounded-xl flex items-center justify-center mb-5 border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-sm">
-            <BarChart3 className="w-6 h-6 text-[var(--text-primary)]" />
+            <ChartColumn className="w-6 h-6 text-[var(--text-primary)]" />
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-[var(--text-primary)] mb-2">Welcome back</h1>
           <p className="text-sm text-[var(--text-secondary)]">

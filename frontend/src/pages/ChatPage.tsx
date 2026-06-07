@@ -18,6 +18,8 @@ interface MentionOption {
   description: string
 }
 
+const GREETING_RE = /^\s*(hi+|hello+|hey+|howdy|good\s+(morning|afternoon|evening|day)|what'?s\s+up|how\s+are\s+you|who\s+are\s+you|what\s+are\s+you|what\s+can\s+you\s+do|help\s*m?e?|greetings?|yo+|hiya|sup)\s*[!?.]*\s*$/i
+
 function stripMarkdown(content: string): string {
   return content
     // Fenced code blocks — keep content, remove fences
@@ -57,8 +59,8 @@ export default function ChatPage() {
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [activeSession, setActiveSession] = useState<ChatSession | null>(null)
   const [selectedAgentId, setSelectedAgentId] = useState('')
-  const [inputValue, setInputValue] = useState('')
-  const [generatingChart, setGeneratingChart] = useState<string | null>(null)
+  const [hasInput, setHasInput] = useState(false)  // only for send button enabled state
+  const generatingChart: string | null = null  // chart generation now happens inline in useChat
   const [activeDataMsgId, setActiveDataMsgId] = useState<string | null>(null)
   const [showAddModal, setShowAddModal] = useState(false)
   const [dashboards, setDashboards] = useState<Dashboard[]>([])
@@ -76,10 +78,10 @@ export default function ChatPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const mentionRef = useRef<HTMLDivElement>(null)
-  const autoChartedIds = useRef(new Set<string>())
+  const autoChartedIds = useRef(new Set<string>())  // still used for summary dedup
   const processedSummaryIds = useRef(new Set<string>())
 
-  const { messages, isLoading, currentStatus, sessionId, sendMessage, setMessages, clearMessages, updateMessageChart, clearPendingChart } = useChat()
+  const { messages, isLoading, currentStatus, sessionId, sendMessage, sendMultiMessage, setMessages, clearMessages } = useChat()
 
   const mentionOptions = useMemo<MentionOption[]>(() => {
     return agents.map(a => ({
@@ -96,10 +98,12 @@ export default function ChatPage() {
   }, [mentionOptions, mentionFilter])
 
   const insertMention = (option: MentionOption) => {
-    const atIdx = inputValue.lastIndexOf('@')
-    const before = atIdx >= 0 ? inputValue.slice(0, atIdx) : inputValue
+    const cur = inputRef.current?.value ?? ''
+    const atIdx = cur.lastIndexOf('@')
+    const before = atIdx >= 0 ? cur.slice(0, atIdx) : cur
     const newVal = before + option.value
-    setInputValue(newVal)
+    if (inputRef.current) inputRef.current.value = newVal
+    setHasInput(newVal.trim().length > 0)
     setShowMentions(false)
     setMentionFilter('')
     setMentionIndex(0)
@@ -152,23 +156,7 @@ export default function ChatPage() {
     })
   }, [messages])
 
-  // Auto-generate chart when message.pendingChart is true (set after SSE finishes with data)
-  useEffect(() => {
-    const sid = sessionId || activeSession?._id
-    if (!sid) return
-    messages.forEach(m => {
-      if (!m.data?.columns?.length || m.pendingChart !== true || m.chart_config || autoChartedIds.current.has(m.id)) return
-      autoChartedIds.current.add(m.id)
-      setGeneratingChart(m.id)
-      api.post(`/api/projects/${projectId}/chat/sessions/${sid}/chart`, { message_id: m.id })
-        .then(({ data }) => updateMessageChart(m.id, data.chart_config))
-        .catch(() => {})
-        .finally(() => {
-          clearPendingChart(m.id)
-          setGeneratingChart(prev => prev === m.id ? null : prev)
-        })
-    })
-  }, [messages, sessionId, activeSession?._id, projectId, updateMessageChart, clearPendingChart])
+  // Chart generation is now handled directly in useChat.sendMessage after stream ends.
 
   const loadSession = async (s: ChatSession) => {
     const { data } = await api.get(`/api/projects/${projectId}/chat/sessions/${s._id}`)
@@ -188,13 +176,14 @@ export default function ChatPage() {
   const startNew = () => {
     setActiveSession(null)
     clearMessages()
+    setSelectedAgentId('')
     setActiveDataMsgId(null)
     setAiSummaries({})
     setSummaryLoadingIds(new Set())
     inputRef.current?.focus()
   }
 
-  /** Actually dispatch a message to a resolved agent. */
+  /** Dispatch a message to a single resolved agent. */
   const dispatch = async (message: string, agentId: string, routingSource = 'unknown') => {
     setSelectedAgentId(agentId)
     await sendMessage({
@@ -207,40 +196,81 @@ export default function ChatPage() {
     api.get(`/api/projects/${projectId}/chat/sessions`).then(({ data }) => setSessions(data)).catch(() => {})
   }
 
-  const handleSend = async () => {
-    if (!inputValue.trim() || isLoading || routing || agents.length === 0) return
-    const msg = inputValue.trim()
+  /** Dispatch a message to multiple agents in parallel — results are consolidated server-side. */
+  const dispatchMulti = async (message: string, agentIds: string[]) => {
+    setSelectedAgentId(agentIds[0])
+    await sendMultiMessage({
+      projectId: projectId!,
+      agentIds,
+      message,
+      existingSessionId: activeSession?._id || sessionId,
+    })
+    api.get(`/api/projects/${projectId}/chat/sessions`).then(({ data }) => setSessions(data)).catch(() => {})
+  }
 
-    // 1. Explicit @-mention wins.
-    const mentionMatch = msg.match(/@(\S+)/)
-    if (mentionMatch) {
-      const found = agents.find(a => a.name.toLowerCase() === mentionMatch[1].toLowerCase())
-      if (found) {
-        setInputValue('')
-        await dispatch(msg, found._id, 'at_mention')
+  const clearInput = () => {
+    if (inputRef.current) {
+      inputRef.current.value = ''
+      inputRef.current.style.height = 'auto'
+    }
+    setHasInput(false)
+  }
+
+  const handleSend = async () => {
+    const raw = inputRef.current?.value ?? ''
+    if (!raw.trim() || isLoading || routing || agents.length === 0) return
+    const msg = raw.trim()
+
+    // 1. Parse ALL @-mentions in the message.
+    const allMentionNames = [...msg.matchAll(/@(\S+)/g)].map(m => m[1])
+    if (allMentionNames.length > 0) {
+      const matched = allMentionNames
+        .map(name => agents.find(a => a.name.toLowerCase() === name.toLowerCase()))
+        .filter(Boolean) as typeof agents
+      const unmatched = allMentionNames.filter(
+        name => !agents.find(a => a.name.toLowerCase() === name.toLowerCase())
+      )
+
+      if (matched.length > 1) {
+        // Multiple valid agents → fire in parallel and consolidate
+        clearInput()
+        await dispatchMulti(msg, matched.map(a => a._id))
         return
       }
-      setAgentPicker({ message: msg, reason: `No agent named “${mentionMatch[1]}”. Choose one:` })
-      setInputValue('')
+      if (matched.length === 1) {
+        clearInput()
+        await dispatch(msg, matched[0]._id, 'at_mention')
+        return
+      }
+      // Only unmatched @mentions
+      setAgentPicker({ message: msg, reason: `No agent named “${unmatched[0]}”. Choose one:` })
+      clearInput()
       return
     }
 
     // 2. Reuse the active agent if the conversation already has one.
     if (selectedAgentId) {
-      setInputValue('')
+      clearInput()
       await dispatch(msg, selectedAgentId, 'continuation')
       return
     }
 
     // 3. Single agent — route automatically, no LLM call needed.
     if (agents.length === 1) {
-      setInputValue('')
+      clearInput()
       await dispatch(msg, agents[0]._id, 'single_agent')
       return
     }
 
-    // 4. No @-mention and no active agent — ask the LLM to route.
-    setInputValue('')
+    // 4. Greeting — no need to call LLM router, any agent will respond correctly.
+    if (GREETING_RE.test(msg)) {
+      clearInput()
+      await dispatch(msg, agents[0]._id, 'greeting')
+      return
+    }
+
+    // 5. No @-mention, no active agent, non-greeting — ask the LLM to route.
+    clearInput()
     setRouting(true)
     try {
       const { data } = await api.post('/api/llm/route-agent', {
@@ -250,12 +280,12 @@ export default function ChatPage() {
       if (data.confident && data.agent_id) {
         await dispatch(msg, data.agent_id, 'auto_routed')
       } else {
-        // 5. Ambiguous — ask the user to choose.
-        setAgentPicker({ message: msg, reason: data.reason || undefined })
+        // LLM ambiguous — ask user to choose via modal.
+        setAgentPicker({ message: msg, reason: data.reason || 'Which agent should handle this?' })
       }
-    } catch (err) {
-      showApiError(err, 'Could not determine which agent to use.')
-      setInputValue(msg)
+    } catch {
+      // LLM router failed — fall back to picker modal.
+      setAgentPicker({ message: msg, reason: 'Could not automatically identify an agent. Please choose one:' })
     } finally {
       setRouting(false)
     }
@@ -269,7 +299,7 @@ export default function ChatPage() {
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value
-    setInputValue(val)
+    setHasInput(val.trim().length > 0)
     const atIdx = val.lastIndexOf('@')
     if (atIdx >= 0) {
       const beforeAt = val.slice(0, atIdx)
@@ -397,8 +427,8 @@ export default function ChatPage() {
               </div>
 
               <div className={`flex-1 min-w-0 ${msg.role === 'user' ? 'text-right' : ''}`}>
-                {/* Hold the full response behind a spinner until SSE + chart are both ready */}
-                {msg.role === 'assistant' && (msg.isStreaming && !msg.content || msg.pendingChart) ? (
+                {/* Hold the full response behind a spinner only while SSE is still streaming */}
+                {msg.role === 'assistant' && msg.isStreaming && !msg.content ? (
                   <div
                     className="inline-block max-w-[90%] rounded-xl px-4 py-2.5 text-sm leading-relaxed rounded-bl-sm"
                     style={{ background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}
@@ -524,7 +554,6 @@ export default function ChatPage() {
           <div className="flex items-end gap-2">
             <textarea
               ref={inputRef}
-              value={inputValue}
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
               placeholder={agents.length === 0 ? 'Create an agent first...' : 'Ask anything... type @ to switch agents'}
@@ -540,7 +569,7 @@ export default function ChatPage() {
             />
             <button
               onClick={handleSend}
-              disabled={!inputValue.trim() || isLoading || routing || agents.length === 0}
+              disabled={!hasInput || isLoading || routing || agents.length === 0}
               className="w-10 h-10 rounded-xl bg-[#e94560] text-white flex items-center justify-center hover:bg-[#e94560]/90 transition-all disabled:opacity-50 shrink-0"
             >
               {(isLoading || routing) ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
@@ -562,7 +591,10 @@ export default function ChatPage() {
           }}
           onCancel={() => {
             // Restore the text so the user can edit or @-mention explicitly.
-            setInputValue(prev => prev || agentPicker.message)
+            if (inputRef.current && !inputRef.current.value) {
+              inputRef.current.value = agentPicker.message
+              setHasInput(true)
+            }
             setAgentPicker(null)
           }}
         />

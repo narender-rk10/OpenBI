@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTheme } from '../../lib/theme'
 
 interface AntVG2ChartProps {
@@ -22,7 +22,7 @@ declare global {
   interface Window { G2?: any }
 }
 
-const G2_CDN = 'https://cdn.jsdelivr.net/npm/@antv/g2@5/dist/g2.min.js'
+const G2_CDN = 'https://cdn.jsdelivr.net/npm/@antv/g2@5.2/dist/g2.min.js'
 
 // Relative luminance — returns true when the color is too dark to see on a dark background
 function isTooDark(hex: string): boolean {
@@ -50,13 +50,19 @@ export default function AntVG2Chart({
 }: AntVG2ChartProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<any>(null)
+  const [renderError, setRenderError] = useState<string | null>(null)
   const { isDark } = useTheme()
 
   const renderChart = () => {
     if (!containerRef.current || !window.G2) return
 
     const g2Spec = config?.g2_spec
-    if (!g2Spec) return
+    if (!g2Spec) {
+      setRenderError('No chart specification available.')
+      return
+    }
+
+    setRenderError(null)
 
     // Destroy existing chart
     if (chartRef.current) {
@@ -81,6 +87,7 @@ export default function AntVG2Chart({
       : rawColors
 
     const textColor = isDark ? '#94a3b8' : '#374151'
+    const baseTheme = isDark ? 'classicDark' : 'classic'
 
     // Axis colors — our theme values win over anything the LLM put in the spec
     const axisStyle = isDark
@@ -90,7 +97,6 @@ export default function AntVG2Chart({
     const specAxis = g2Spec.axis ?? {}
     const mergedAxis: any = {}
     for (const k of ['x', 'y']) {
-      // LLM properties (title, formatter, etc.) first, then our visual overrides win
       mergedAxis[k] = {
         ...(specAxis[k] ?? {}),
         labelFill: axisStyle.labelFill,
@@ -101,15 +107,16 @@ export default function AntVG2Chart({
       }
     }
 
+    // Build spec with corrected theme — use `type` key to reference G2 built-in theme
+    // while still applying our color/background overrides on top of it.
     const spec: any = {
       ...g2Spec,
       theme: {
-        ...g2Spec.theme,
+        type: baseTheme,         // ← G2 v5: 'type' selects the named base theme
         color10: chartColors,
         background: 'transparent',
       },
       axis: mergedAxis,
-      // Legend text color — G2 v5 legend component accepts these shorthand fills
       legend: {
         ...(g2Spec.legend ?? {}),
         color: {
@@ -122,11 +129,20 @@ export default function AntVG2Chart({
       },
     }
 
-    // Patch chart title text color for the current theme
+    // Patch chart title — G2 v5 uses `text` key inside title objects
     if (spec.title) {
-      const titleObj = typeof spec.title === 'string' ? { title: spec.title } : { ...spec.title }
-      titleObj.style = { ...(titleObj.style ?? {}), fill: isDark ? '#e2e8f0' : '#111827' }
-      spec.title = titleObj
+      if (typeof spec.title === 'string') {
+        spec.title = { text: spec.title, style: { fill: isDark ? '#e2e8f0' : '#111827' } }
+      } else {
+        // Support both 'text' and legacy 'title' key from LLM output
+        const titleText = spec.title.text || spec.title.title || ''
+        spec.title = {
+          ...spec.title,
+          text: titleText,
+          style: { ...(spec.title.style ?? {}), fill: isDark ? '#e2e8f0' : '#111827' },
+        }
+        delete spec.title.title  // remove legacy key
+      }
     }
 
     // Inject real data — always overrides sample data from LLM
@@ -135,18 +151,18 @@ export default function AntVG2Chart({
     }
 
     try {
+      // Do NOT pass theme to constructor — let chart.options() handle it via spec.theme.type
       const chart = new window.G2.Chart({
         container: containerRef.current,
         autoFit: true,
         height,
-        // Built-in dark/light theme sets base label, legend, and background colors
-        theme: isDark ? 'classicDark' : 'classic',
       })
       chart.options(spec)
       chart.render()
       chartRef.current = chart
-    } catch (err) {
+    } catch (err: any) {
       console.error('[AntVG2Chart] render error:', err)
+      setRenderError(err?.message || 'Chart rendering failed')
     }
   }
 
@@ -199,6 +215,19 @@ export default function AntVG2Chart({
   // If this is a legacy Plotly config (no g2_spec), render via CDN Plotly
   if (!config?.g2_spec && config?.plotly_data) {
     return <LegacyPlotlyFallback config={config} height={height} className={className} />
+  }
+
+  if (renderError) {
+    return (
+      <div
+        className={`w-full flex flex-col items-center justify-center gap-2 rounded-xl ${className}`}
+        style={{ height, minHeight: height, background: 'var(--bg-secondary)', border: '1px dashed var(--border-color)' }}
+      >
+        <span className="text-2xl">📊</span>
+        <p className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>Chart render failed</p>
+        <p className="text-[10px] text-center max-w-xs px-4" style={{ color: 'var(--text-muted)' }}>{renderError}</p>
+      </div>
+    )
   }
 
   return (

@@ -309,10 +309,14 @@ class MindsDBClient:
                 "table": kb_config["name"].replace("-", "_"),
             }
         kb_body = {**kb_config, "storage": storage}
+        # KB creation initialises the embedding model (Gemini/OpenAI network call) and
+        # provisions the vector store — this can take 90–300 s.  Pass an explicit long
+        # timeout so httpx doesn't inherit the 60 s client default and hang forever.
         resp = await self._request(
             "POST",
             f"/api/projects/{project}/knowledge_bases",
             json={"knowledge_base": kb_body},
+            timeout=300.0,
             operation=f"create KB '{kb_config.get('name', '?')}'",
         )
         return resp.json()
@@ -333,7 +337,17 @@ class MindsDBClient:
         )
 
     async def insert_into_kb(self, project: str, kb_name: str, source: str):
-        return await self.sql_query(f"INSERT INTO {project}.{kb_name} SELECT * FROM {source}")
+        # Embedding a full document can take minutes — use a long timeout via a
+        # dedicated client request rather than going through sql_query (which
+        # uses the default 60 s timeout).
+        resp = await self._request(
+            "POST",
+            "/api/sql/query",
+            json={"query": f"INSERT INTO {project}.{kb_name} SELECT * FROM {source}"},
+            timeout=300.0,
+            operation=f"insert into KB '{kb_name}'",
+        )
+        return resp.json()
 
     # ── Files ───────────────────────────────────────────────────────────
 

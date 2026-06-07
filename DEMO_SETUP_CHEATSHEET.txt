@@ -1,0 +1,466 @@
+========================================================
+  OpenBI Finance Demo - Manual Setup Cheat Sheet
+========================================================
+
+PROJECT NAME
+------------
+OpenBI Finance Demo
+
+
+========================================================
+  CONNECTIONS (4 total)
+========================================================
+
+Connection 1
+  Name:     Finance Portfolio DB
+  Engine:   PostgreSQL
+  Host:     openbi-postgres
+  Port:     5432
+  Database: financedb
+  User:     financeuser
+  Password: Finance@123
+
+Connection 2
+  Name:     Retail E-Commerce DB
+  Engine:   PostgreSQL
+  Host:     openbi-postgres
+  Port:     5432
+  Database: retaildb
+  User:     financeuser
+  Password: Finance@123
+
+Connection 3
+  Name:     Marketing Campaigns MySQL
+  Engine:   MySQL
+  Host:     openbi-mysql
+  Port:     3306
+  Database: marketingdb
+  User:     marketinguser
+  Password: Marketing@123
+
+Connection 4
+  Name:     HR Operations MySQL
+  Engine:   MySQL
+  Host:     openbi-mysql
+  Port:     3306
+  Database: hrdb
+  User:     marketinguser
+  Password: Marketing@123
+
+
+========================================================
+  KNOWLEDGE BASES (2 total)
+========================================================
+
+KB 1
+  Name:        ESG Fund Scores
+  Description: Quarterly ESG scores for USEQ, GBAQ, USFX, EMEQ - FY2020-FY2023
+  File:        seed/esg_fund_report.md
+
+KB 2
+  Name:        Board Strategy Report FY2024
+  Description: Investment committee strategy, alpha targets, AUM goals, risk mandates
+  File:        seed/demo_kb_board_report.md
+
+
+========================================================
+  AGENTS (3 total)
+========================================================
+
+----------------------------------------------------------
+Agent 1 - FinanceSQL
+----------------------------------------------------------
+Name:        FinanceSQL
+Description: SQL agent across PostgreSQL finance/retail and MySQL marketing/HR
+
+Prompt:
+You are a senior financial data analyst. Generate accurate SQL queries across multiple databases.
+
+PostgreSQL financedb tables:
+  funds(fund_id, fund_name, ticker, asset_class, management_fee_bps)
+  daily_nav(nav_id, fund_id, trade_date, nav_per_share, total_aum, daily_net_flow)
+  portfolios(portfolio_id, client_name, client_type, inception_date)
+  client_transactions(tx_id, tx_date, portfolio_id, fund_id, tx_type, amount)
+  benchmark_returns(return_id, fund_id, period_date, fund_return_pct, benchmark_return_pct, alpha_bps)
+
+PostgreSQL retaildb tables:
+  customers(customer_id, name, email, city, customer_type)
+  orders(order_id, customer_id, order_date, status)
+  order_items(order_item_id, order_id, product_id, quantity, unit_price)
+  products(product_id, name, category, price_usd)
+
+MySQL marketingdb tables:
+  marketing_campaigns(campaign_id, campaign_name, channel, target_client_type)
+  client_acquisitions(acquisition_id, report_date, campaign_id, marketing_spend, new_leads, converted_clients, new_aum_acquired)
+
+MySQL hrdb tables:
+  departments(department_id, name, location)
+  employees(employee_id, department_id, full_name, title, salary_usd, hire_date)
+  attendance(att_id, emp_id, att_date, status)
+
+Rules:
+- Show monetary values in millions (M) or billions (B) with 2 decimal places
+- For MySQL use DATE_FORMAT, YEAR(), MONTH()
+- For PostgreSQL use TO_CHAR, DATE_TRUNC, EXTRACT
+- Always ORDER BY relevant column
+
+Skills: Add ALL 4 connections as text2sql
+  - Finance Portfolio DB    -> tables: funds, daily_nav, portfolios, client_transactions, benchmark_returns
+  - Retail E-Commerce DB    -> tables: customers, orders, order_items, products
+  - Marketing Campaigns MySQL -> tables: marketing_campaigns, client_acquisitions
+  - HR Operations MySQL     -> tables: departments, employees, attendance
+
+----------------------------------------------------------
+Agent 2 - RAGExpert
+----------------------------------------------------------
+Name:        RAGExpert
+Description: Document RAG agent for ESG scores and board strategy
+
+Prompt:
+You are a research analyst specialising in ESG investing and fund strategy.
+Answer questions using the ESG fund scoring knowledge base and the investment committee board report.
+Always cite specific scores, ratings, alpha targets, and benchmarks with exact numbers.
+NEVER write SQL against the knowledge base.
+
+Skills: Add both KBs as knowledge_base
+  - ESG Fund Scores
+  - Board Strategy Report FY2024
+
+----------------------------------------------------------
+Agent 3 - HybridAnalyst
+----------------------------------------------------------
+Name:        HybridAnalyst
+Description: Combines SQL databases and knowledge base documents
+
+Prompt:
+You are a comprehensive financial analyst combining live database data with document insights.
+For quantitative questions (AUM, NAV, transactions): query SQL databases.
+For qualitative questions (ESG ratings, board strategy, alpha targets): search knowledge bases.
+For combined questions: query SQL first, then search KB separately, then synthesise.
+NEVER JOIN SQL tables with knowledge base tables in one query.
+Run SQL and KB searches as SEPARATE operations, then combine results.
+
+Skills: Add ALL 4 connections (text2sql) + both KBs (knowledge_base)
+
+
+========================================================
+  CHAT QUERIES FOR DEMO
+========================================================
+
+--- @FinanceSQL ---
+
+Q1 - AUM Ranking:
+  Show total AUM in billions for each fund at the latest date, ranked highest to lowest.
+
+Q2 - Risk-Adjusted Return:
+  Calculate average NAV and standard deviation for each fund in 2024.
+  Rank by risk-adjusted return (avg_nav / stddev_nav) highest first.
+
+Q3 - Multi-table join:
+  Join funds, daily_nav, and client_transactions: show fund name, latest AUM,
+  total deposits in 2024, and deposit count. Order by AUM descending.
+
+Q4 - MySQL Marketing ROI:
+  Which marketing campaign had the best ROI (new_aum_acquired / marketing_spend) in 2024?
+  Show top 3: campaign name, channel, total spend, AUM acquired, ROI ratio.
+
+Q5 - HR Salaries:
+  Show average salary by department from HR data, ordered by highest average salary first.
+
+Q6 - Retail Products:
+  What are the top 5 products by total revenue in the retail database?
+
+--- @RAGExpert ---
+
+Q7 - ESG Scores:
+  What are the ESG ratings for all 4 funds as of Q4 2023?
+  Show environment, social, and governance scores for each. Which fund is rated AA?
+
+Q8 - Board Strategy:
+  What alpha target was set for EMEQ in the board report?
+  What benchmark does it track and what is the overall AUM target for the portfolio?
+
+--- @HybridAnalyst ---
+
+Q9 - Combined SQL + KB:
+  From the database: what is total AUM of the Emerging Markets fund at the latest date?
+  From the knowledge base: what alpha target was set for EMEQ and what is its ESG rating in Q4 2023?
+
+Q10 - Follow-up (same session, no @mention needed):
+  Based on the AUM you just found - is the fund on track to meet the board's overall $3.5B target?
+
+
+========================================================
+  DASHBOARD
+========================================================
+
+Dashboard Name: Finance Analytics - Fund Portfolio Dashboard
+
+----------------------------------------------------------
+Widget 1 - Chart
+----------------------------------------------------------
+Title:      Daily NAV Trend - All Funds 2024
+Type:       Chart
+Connection: Finance Portfolio DB
+SQL:
+SELECT f.fund_name,
+       TO_CHAR(DATE_TRUNC('month', dn.trade_date), 'YYYY-MM') AS month,
+       ROUND(AVG(dn.nav_per_share), 4) AS avg_nav
+FROM daily_nav dn
+JOIN funds f ON dn.fund_id = f.fund_id
+WHERE dn.trade_date >= '2024-01-01' AND dn.trade_date <= '2024-12-31'
+GROUP BY f.fund_name, DATE_TRUNC('month', dn.trade_date)
+ORDER BY month, f.fund_name
+
+----------------------------------------------------------
+Widget 2 - Chart
+----------------------------------------------------------
+Title:      Total AUM by Fund (Latest)
+Type:       Chart
+Connection: Finance Portfolio DB
+SQL:
+SELECT f.fund_name,
+       ROUND(dn.total_aum / 1000000000.0, 2) AS aum_billions
+FROM daily_nav dn
+JOIN funds f ON dn.fund_id = f.fund_id
+WHERE dn.trade_date = (SELECT MAX(trade_date) FROM daily_nav)
+ORDER BY aum_billions DESC
+
+----------------------------------------------------------
+Widget 3 - Chart
+----------------------------------------------------------
+Title:      Asset Class AUM Share
+Type:       Chart
+Connection: Finance Portfolio DB
+SQL:
+SELECT f.asset_class,
+       ROUND(SUM(dn.total_aum) / 1000000000.0, 2) AS total_aum_B
+FROM daily_nav dn
+JOIN funds f ON dn.fund_id = f.fund_id
+WHERE dn.trade_date = (SELECT MAX(trade_date) FROM daily_nav)
+GROUP BY f.asset_class
+ORDER BY total_aum_B DESC
+
+----------------------------------------------------------
+Widget 4 - Chart
+----------------------------------------------------------
+Title:      Monthly Net Flows by Fund 2024
+Type:       Chart
+Connection: Finance Portfolio DB
+SQL:
+SELECT f.ticker,
+       TO_CHAR(DATE_TRUNC('month', dn.trade_date), 'YYYY-MM') AS month,
+       ROUND(SUM(dn.daily_net_flow) / 1000000.0, 2) AS net_flow_M
+FROM daily_nav dn
+JOIN funds f ON dn.fund_id = f.fund_id
+WHERE EXTRACT(YEAR FROM dn.trade_date) = 2024
+GROUP BY f.ticker, DATE_TRUNC('month', dn.trade_date)
+ORDER BY month, f.ticker
+
+----------------------------------------------------------
+Widget 5 - Chart
+----------------------------------------------------------
+Title:      Fund NAV vs Risk - Scatter 2024
+Type:       Chart
+Connection: Finance Portfolio DB
+SQL:
+SELECT f.fund_name,
+       ROUND(AVG(dn.nav_per_share), 2) AS avg_nav,
+       ROUND(STDDEV(dn.nav_per_share), 2) AS nav_stddev
+FROM daily_nav dn
+JOIN funds f ON dn.fund_id = f.fund_id
+WHERE EXTRACT(YEAR FROM dn.trade_date) = 2024
+GROUP BY f.fund_name
+ORDER BY avg_nav DESC
+
+----------------------------------------------------------
+Widget 6 - Chart
+----------------------------------------------------------
+Title:      AUM Growth 5Y - Global Alpha Equity
+Type:       Chart
+Connection: Finance Portfolio DB
+SQL:
+SELECT TO_CHAR(DATE_TRUNC('year', dn.trade_date), 'YYYY') AS year,
+       ROUND(AVG(dn.total_aum) / 1000000000.0, 2) AS avg_aum_B
+FROM daily_nav dn
+JOIN funds f ON dn.fund_id = f.fund_id
+WHERE f.ticker = 'GBAQ'
+GROUP BY DATE_TRUNC('year', dn.trade_date)
+ORDER BY year
+
+----------------------------------------------------------
+Widget 7 - Chart
+----------------------------------------------------------
+Title:      Transaction Type Distribution
+Type:       Chart
+Connection: Finance Portfolio DB
+SQL:
+SELECT tx_type,
+       COUNT(*) AS tx_count,
+       ROUND(SUM(amount) / 1000000.0, 1) AS total_M
+FROM client_transactions
+GROUP BY tx_type
+ORDER BY tx_count DESC
+
+----------------------------------------------------------
+Widget 8 - Chart
+----------------------------------------------------------
+Title:      Marketing Spend by Campaign 2024
+Type:       Chart
+Connection: Marketing Campaigns MySQL
+SQL:
+SELECT mc.campaign_name,
+       mc.channel,
+       ROUND(SUM(ca.marketing_spend) / 1000000.0, 2) AS spend_M
+FROM client_acquisitions ca
+JOIN marketing_campaigns mc ON ca.campaign_id = mc.campaign_id
+WHERE YEAR(ca.report_date) = 2024
+GROUP BY mc.campaign_name, mc.channel
+ORDER BY spend_M DESC
+
+----------------------------------------------------------
+Widget 9 - Chart
+----------------------------------------------------------
+Title:      Monthly New Clients Acquired 2024
+Type:       Chart
+Connection: Marketing Campaigns MySQL
+SQL:
+SELECT DATE_FORMAT(report_date, '%Y-%m') AS month,
+       SUM(converted_clients) AS new_clients
+FROM client_acquisitions
+WHERE YEAR(report_date) = 2024
+GROUP BY DATE_FORMAT(report_date, '%Y-%m')
+ORDER BY month
+
+----------------------------------------------------------
+Widget 10 - Chart
+----------------------------------------------------------
+Title:      New AUM by Marketing Channel
+Type:       Chart
+Connection: Marketing Campaigns MySQL
+SQL:
+SELECT mc.channel,
+       ROUND(SUM(ca.new_aum_acquired) / 1000000000.0, 2) AS aum_acquired_B
+FROM client_acquisitions ca
+JOIN marketing_campaigns mc ON ca.campaign_id = mc.campaign_id
+WHERE YEAR(ca.report_date) = 2024
+GROUP BY mc.channel
+ORDER BY aum_acquired_B DESC
+
+----------------------------------------------------------
+Widget 11 - Table
+----------------------------------------------------------
+Title:      Fund Summary - Latest NAV
+Type:       Table
+Connection: Finance Portfolio DB
+SQL:
+SELECT f.fund_name, f.ticker, f.asset_class,
+       ROUND(dn.total_aum / 1000000000.0, 2) AS aum_B,
+       ROUND(dn.nav_per_share, 4) AS nav_per_share,
+       f.management_fee_bps
+FROM funds f
+JOIN daily_nav dn ON f.fund_id = dn.fund_id
+WHERE dn.trade_date = (SELECT MAX(trade_date) FROM daily_nav)
+ORDER BY aum_B DESC
+
+----------------------------------------------------------
+Widget 12 - Table
+----------------------------------------------------------
+Title:      Marketing ROI by Campaign
+Type:       Table
+Connection: Marketing Campaigns MySQL
+SQL:
+SELECT mc.campaign_name, mc.channel,
+       ROUND(SUM(ca.marketing_spend) / 1000000.0, 2) AS spend_M,
+       ROUND(SUM(ca.new_aum_acquired) / 1000000.0, 0) AS aum_acquired_M,
+       SUM(ca.converted_clients) AS clients,
+       ROUND(SUM(ca.new_aum_acquired) / SUM(ca.marketing_spend), 0) AS roi_ratio
+FROM client_acquisitions ca
+JOIN marketing_campaigns mc ON ca.campaign_id = mc.campaign_id
+GROUP BY mc.campaign_name, mc.channel
+ORDER BY roi_ratio DESC
+
+----------------------------------------------------------
+Widget 13 - Table
+----------------------------------------------------------
+Title:      HR Salary by Department
+Type:       Table
+Connection: HR Operations MySQL
+SQL:
+SELECT d.name AS department,
+       COUNT(e.employee_id) AS headcount,
+       ROUND(AVG(e.salary_usd), 0) AS avg_salary,
+       ROUND(MIN(e.salary_usd), 0) AS min_salary,
+       ROUND(MAX(e.salary_usd), 0) AS max_salary
+FROM employees e
+JOIN departments d ON e.department_id = d.department_id
+GROUP BY d.name
+ORDER BY avg_salary DESC
+
+----------------------------------------------------------
+Widget 14 - Table
+----------------------------------------------------------
+Title:      Retail Top Products by Revenue
+Type:       Table
+Connection: Retail E-Commerce DB
+SQL:
+SELECT p.name AS product, p.category,
+       SUM(oi.quantity) AS units_sold,
+       ROUND(SUM(oi.quantity * oi.unit_price), 2) AS revenue
+FROM order_items oi
+JOIN products p ON oi.product_id = p.product_id
+GROUP BY p.name, p.category
+ORDER BY revenue DESC
+LIMIT 10
+
+
+========================================================
+  GLOBAL FILTERS (add after all widgets)
+========================================================
+
+Filter 1:  Column = fund_name    Type = select        Label = Fund
+Filter 2:  Column = trade_date   Type = date_range    Label = Date Range
+Filter 3:  Column = asset_class  Type = multi_select  Label = Asset Class
+
+
+========================================================
+  SCHEDULE
+========================================================
+
+Name:      Finance Dashboard - Every 15 Minutes
+Cron:      */15 * * * *
+Dashboard: Finance Analytics - Fund Portfolio Dashboard
+Delivery:  Email -> narender.rk10@gmail.com
+Active:    Yes
+
+
+========================================================
+  VIDEO RECORDING SCRIPT (scene order)
+========================================================
+
+SCENE 0  - Show terminal: docker compose ps                         (20 sec)
+SCENE 1  - Login at http://localhost:3000                           (10 sec)
+SCENE 2  - Project + 4 Connections with green Connected badges      (30 sec)
+SCENE 3  - Knowledge Bases tab, show 2 KBs with Ready status        (20 sec)
+SCENE 4  - Agents tab, show 3 agent cards                           (15 sec)
+SCENE 5  - Chat @FinanceSQL: run Q1, Q2, Q4 (show SQL + chart)      (2 min)
+SCENE 6  - Chat @RAGExpert: run Q7, Q8                              (1 min)
+SCENE 7  - Chat @HybridAnalyst: run Q9, Q10                         (1 min)
+SCENE 8  - Dashboard: scroll all 14 widgets                         (1.5 min)
+SCENE 9  - Dashboard Chat: change chart type                         (30 sec)
+SCENE 10 - Global Filters: select Emerging Markets, watch update     (30 sec)
+SCENE 11 - Export PDF                                                (15 sec)
+SCENE 12 - Export PPTX (Presenton)                                   (20 sec)
+SCENE 13 - Schedules tab: show schedule card                         (20 sec)
+SCENE 14 - Closing shot on dashboard                                 (15 sec)
+
+Total: ~8-10 minutes
+
+
+========================================================
+  LOGIN CREDENTIALS
+========================================================
+
+URL:      http://localhost:3000
+Email:    admin@openbi.dev
+Password: changeme123

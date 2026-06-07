@@ -1,5 +1,6 @@
 """Chat routes — SSE streaming with MindsDB agents, @ChartAgent/@TableAgent routing."""
 
+import asyncio
 import json
 import re
 from datetime import datetime, timezone
@@ -57,6 +58,12 @@ class ChartAgentRequest(BaseModel):
 class TableAgentRequest(BaseModel):
     message_id: str
     user_message: str
+
+
+class MultiChatRequest(BaseModel):
+    session_id: str | None = None
+    agent_ids: list[str]
+    message: str
 
 
 def _serialize_session(s: dict) -> dict:
@@ -322,6 +329,138 @@ async def chat(
         })
 
         yield _sse("done", {"session_id": str(session["_id"]), "message_id": msg_id, "latency_ms": latency_ms})
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@router.post("/multi")
+async def multi_chat(
+    project_id: str,
+    body: MultiChatRequest,
+    user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Fire one message to multiple agents in parallel and stream a consolidated report."""
+    from backend.services.llm_client import call_llm
+
+    project = await get_current_project(project_id, user, db)
+
+    agents_list = []
+    for agent_id in body.agent_ids:
+        agent = await db.agents.find_one({"_id": ObjectId(agent_id), "project_id": ObjectId(project_id)})
+        if not agent:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Agent {agent_id} not found")
+        agents_list.append(agent)
+
+    if not agents_list:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No agents specified")
+
+    mindsdb_project = project["mindsdb_project_name"]
+    try:
+        await mindsdb.ensure_project(mindsdb_project)
+    except MindsDBError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=e.message)
+
+    async def _query_agent(agent: dict) -> tuple[str, str]:
+        messages = [{"question": body.message, "answer": None}]
+        answer = ""
+        try:
+            async for chunk in mindsdb.chat_with_agent_stream(mindsdb_project, agent["mindsdb_agent_name"], messages):
+                try:
+                    ev = json.loads(chunk)
+                except json.JSONDecodeError:
+                    continue
+                evt_type = ev.get("type", "")
+                if evt_type == "data":
+                    answer = ev.get("text", "") or ev.get("content", "")
+                elif evt_type != "context" and "output" in ev:
+                    answer = ev["output"]
+                if evt_type == "end":
+                    break
+        except Exception as e:
+            answer = f"[Error: {e}]"
+        return agent["name"], answer
+
+    async def event_stream():
+        yield _sse("thinking", {"step": f"Querying {len(agents_list)} agents in parallel..."})
+
+        results: list[tuple[str, str]] = await asyncio.gather(*[_query_agent(a) for a in agents_list])
+
+        for name, _ in results:
+            yield _sse("thinking", {"step": f"Received response from {name}"})
+
+        if len(results) == 1:
+            final_answer = results[0][1] or "No response"
+        else:
+            yield _sse("thinking", {"step": "Consolidating results from all agents..."})
+            sections = "\n\n".join(
+                f"**{name}:**\n{ans}" if ans else f"**{name}:**\n[No data returned]"
+                for name, ans in results
+            )
+            prompt = (
+                "You are a senior business analyst. Multiple data agents answered the same question.\n\n"
+                f'User question: "{body.message}"\n\n'
+                f"Agent responses:\n{sections}\n\n"
+                "Write a concise consolidated report. Use a heading per agent for key findings, "
+                "then a '## Summary' section with combined insights."
+            )
+            try:
+                final_answer = await call_llm(prompt)
+            except Exception:
+                final_answer = sections
+
+        yield _sse("answer", {"content": final_answer})
+
+        # Persist to session
+        now = datetime.now(timezone.utc)
+        agent_names = " & ".join(a["name"] for a in agents_list)
+        msg_id = f"msg_{uuid4().hex[:8]}"
+        user_msg_doc = {
+            "id": f"msg_{uuid4().hex[:8]}",
+            "role": "user",
+            "content": body.message,
+            "agent_name": agent_names,
+            "timestamp": now,
+        }
+        assistant_msg_doc = {
+            "id": msg_id,
+            "role": "assistant",
+            "content": final_answer,
+            "agent_name": agent_names,
+            "sql_query": None,
+            "data": None,
+            "chart_config": None,
+            "table_config": None,
+            "timestamp": now,
+        }
+
+        if body.session_id:
+            session_doc = await db.chat_sessions.find_one({"_id": ObjectId(body.session_id)})
+        else:
+            session_doc = None
+
+        if session_doc:
+            await db.chat_sessions.update_one(
+                {"_id": session_doc["_id"]},
+                {"$push": {"messages": {"$each": [user_msg_doc, assistant_msg_doc]}}, "$set": {"updated_at": now}},
+            )
+            session_id_str = str(session_doc["_id"])
+        else:
+            new_session = {
+                "project_id": ObjectId(project_id),
+                "user_id": ObjectId(user["_id"]),
+                "title": body.message[:60],
+                "agent_id": agents_list[0]["_id"],
+                "messages": [user_msg_doc, assistant_msg_doc],
+                "pinned_sources": [],
+                "is_shared": False,
+                "created_at": now,
+                "updated_at": now,
+            }
+            ins = await db.chat_sessions.insert_one(new_session)
+            session_id_str = str(ins.inserted_id)
+
+        yield _sse("done", {"session_id": session_id_str, "message_id": msg_id, "latency_ms": 0})
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 

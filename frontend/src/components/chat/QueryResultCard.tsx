@@ -389,8 +389,8 @@ export default function QueryResultCard({
                 <AntVG2Chart config={chartConfig} columns={columns} rows={rows} height={300} />
               ) : (
                 <div className="flex flex-col items-center justify-center h-56 gap-3">
-                  <Loader2 className="w-8 h-8 animate-spin text-[#e94560]" />
-                  <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Preparing chart…</p>
+                  <span className="text-2xl">📊</span>
+                  <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Chart not available</p>
                 </div>
               )}
             </div>

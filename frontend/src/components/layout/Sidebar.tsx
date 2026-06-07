@@ -1,5 +1,5 @@
 import { Link, useLocation, useParams } from 'react-router-dom'
-import { BarChart3, MessageSquare, LayoutDashboard, Settings, FolderOpen, Database, Brain, Bot, Clock, Activity, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { ChartColumn, MessageSquare, LayoutDashboard, Settings, FolderOpen, Database, Brain, Bot, Clock, Activity, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { useLayout } from '../../lib/layout'
 import { useBranding } from '../../lib/branding'
@@ -52,7 +52,7 @@ export default function Sidebar() {
               {logoUrl ? (
                 <img src={logoUrl} alt="Logo" className="w-full h-full object-cover" />
               ) : (
-                <BarChart3 className="w-5 h-5" />
+                <ChartColumn className="w-5 h-5" />
               )}
             </div>
             <div className={cn(

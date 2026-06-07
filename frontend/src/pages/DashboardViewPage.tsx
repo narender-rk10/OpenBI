@@ -199,7 +199,12 @@ export default function DashboardViewPage() {
       setError(null)
       const { data } = await api.get(`/api/projects/${projectId}/dashboards/${dashboardId}`)
       setDashboard(data)
-      setWidgets(data.widgets || [])
+      const widgetList: Widget[] = data.widgets || []
+      setWidgets(widgetList)
+      // Auto-refresh widgets that have no cached data (e.g. created via API/script with SQL binding)
+      widgetList
+        .filter(w => !w.cached_data?.columns?.length && (w.data_binding as any)?.query)
+        .forEach(w => refreshWidget(w))
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to load dashboard')
     } finally {
@@ -327,6 +332,10 @@ export default function DashboardViewPage() {
       setIsExportingPDF(true)
       setError(null)
       const fileName = `${dashboard?.name || 'dashboard'}.pdf`
+
+      // Wait for any pending G2 chart animations to finish before capturing canvases.
+      // G2 default animation duration is 300ms — 500ms gives a safe margin.
+      await new Promise(resolve => setTimeout(resolve, 500))
 
       // Capture each chart widget's AntV <canvas> directly. We avoid html2canvas on
       // the whole page because Tailwind v4 emits oklch()/color-mix() colors it can't

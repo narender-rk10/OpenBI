@@ -1,5 +1,6 @@
 services:
   backend:
+    image: ghcr.io/narender-rk10/openbi-backend:latest
     build:
       context: .
       dockerfile: Dockerfile
@@ -24,6 +25,7 @@ services:
     command: uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 
   frontend:
+    image: ghcr.io/narender-rk10/openbi-frontend:latest
     build:
       context: ./frontend
       dockerfile: ../Dockerfile.frontend
@@ -44,6 +46,7 @@ services:
       - openbi-network
 
   mindsdb:
+    image: ghcr.io/narender-rk10/openbi-mindsdb:latest
     build:
       context: .
       dockerfile: Dockerfile.mindsdb
@@ -76,6 +79,7 @@ services:
       retries: 5
 
   presenton:
+    image: ghcr.io/narender-rk10/openbi-presenton:latest
     build:
       context: .
       dockerfile: Dockerfile.presenton
@@ -95,6 +99,7 @@ services:
       - openbi-network
 
   telegram_bot:
+    image: ghcr.io/narender-rk10/openbi-telegram-bot:latest
     build:
       context: .
       dockerfile: telegram_bot/Dockerfile.telegram
@@ -106,6 +111,56 @@ services:
     networks:
       - openbi-network
 
+  # ── Finance + Retail PostgreSQL ─────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: openbi-postgres
+    environment:
+      POSTGRES_DB: financedb
+      POSTGRES_USER: financeuser
+      POSTGRES_PASSWORD: Finance@123
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./seed/demo_finance_pg.sql:/docker-entrypoint-initdb.d/demo_finance_pg.sql:ro
+      - ./seed/postgres-retail.sql:/docker-entrypoint-initdb.d/postgres-retail.sql:ro
+      - ./seed/pg-init/init.sh:/docker-entrypoint-initdb.d/00-init.sh:ro
+    networks:
+      - openbi-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U financeuser -d financedb"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 120s
+
+  # ── Marketing + HR MySQL ──────────────────────────────────────────────────
+  mysql:
+    image: mysql:8.0
+    container_name: openbi-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: Root@MySQL123
+      MYSQL_DATABASE: marketingdb
+      MYSQL_USER: marketinguser
+      MYSQL_PASSWORD: Marketing@123
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./seed/demo_marketing_mysql.sql:/sql-seed/demo_marketing_mysql.sql:ro
+      - ./seed/mysql-hr.sql:/sql-seed/mysql-hr.sql:ro
+      - ./seed/mysql-init/init.sh:/docker-entrypoint-initdb.d/00-init.sh:ro
+    networks:
+      - openbi-network
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pRoot@MySQL123"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
 networks:
   openbi-network:
     driver: bridge
@@ -114,3 +169,5 @@ volumes:
   mindsdb_data:
   uploads:
   presenton_data:
+  postgres_data:
+  mysql_data:

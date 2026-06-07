@@ -1,5 +1,7 @@
 FROM python:3.11-slim
 
+LABEL org.opencontainers.image.source=https://github.com/narender-rk10/OpenBI
+
 WORKDIR /app
 
 # System deps for WeasyPrint + Kaleido

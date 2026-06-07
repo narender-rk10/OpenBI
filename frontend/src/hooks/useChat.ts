@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useCallback, useEffect, useRef, useState } from 'react'
+import api from '../lib/api'
 
 export interface ChatMessageState {
   id: string
@@ -27,6 +28,12 @@ interface UseChatReturn {
     message: string
     existingSessionId?: string | null
     routingSource?: string
+  }) => Promise<void>
+  sendMultiMessage: (params: {
+    projectId: string
+    agentIds: string[]
+    message: string
+    existingSessionId?: string | null
   }) => Promise<void>
   setMessages: React.Dispatch<React.SetStateAction<ChatMessageState[]>>
   clearMessages: () => void
@@ -211,12 +218,12 @@ export function useChat(): UseChatReturn {
         }
       }
 
-      // Finalize message — pendingChart=true if data present (chart auto-gen will clear it)
+      // Finalize message
+      const hasData = accumData != null && accumData.columns.length > 0
       setMessages(prev => {
         const updated = [...prev]
         const idx = updated.findIndex(m => m.id === assistantId || m.id === finalMessageId)
         if (idx !== -1) {
-          const hasData = accumData != null && accumData.columns.length > 0
           updated[idx] = {
             ...updated[idx],
             id: finalMessageId,
@@ -224,7 +231,7 @@ export function useChat(): UseChatReturn {
             sql_query: accumSql || undefined,
             data: accumData || undefined,
             isStreaming: false,
-            pendingChart: hasData,
+            pendingChart: false,
             latency_ms: accumLatencyMs,
           }
         }
@@ -232,6 +239,22 @@ export function useChat(): UseChatReturn {
       })
 
       if (newSessionId) setSessionId(newSessionId)
+
+      // Generate chart immediately — we have sessionId + messageId in scope here,
+      // so no timing/batching dependency on React effects.
+      if (hasData && newSessionId && finalMessageId) {
+        try {
+          const chartResp = await api.post(
+            `/api/projects/${projectId}/chat/sessions/${newSessionId}/chart`,
+            { message_id: finalMessageId }
+          )
+          if (chartResp.data?.chart_config) {
+            setMessages(prev =>
+              prev.map(m => m.id === finalMessageId ? { ...m, chart_config: chartResp.data.chart_config } : m)
+            )
+          }
+        } catch { /* chart is optional — silently skip */ }
+      }
     } catch (err: any) {
       if (err.name === 'AbortError') return
       setMessages(prev => {
@@ -253,12 +276,126 @@ export function useChat(): UseChatReturn {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  const sendMultiMessage = useCallback(async ({
+    projectId,
+    agentIds,
+    message,
+    existingSessionId,
+  }: {
+    projectId: string
+    agentIds: string[]
+    message: string
+    existingSessionId?: string | null
+  }) => {
+    if (isLoadingRef.current) return
+
+    const userMsg: ChatMessageState = {
+      id: `user_${Date.now()}`,
+      role: 'user',
+      content: message,
+      timestamp: new Date().toISOString(),
+    }
+    setMessages(prev => [...prev, userMsg])
+    setIsLoading(true)
+    setCurrentStatus('Querying agents...')
+
+    const assistantId = `asst_${Date.now()}`
+    setMessages(prev => [...prev, {
+      id: assistantId,
+      role: 'assistant',
+      content: '',
+      timestamp: new Date().toISOString(),
+      isStreaming: true,
+    }])
+
+    try {
+      abortRef.current = new AbortController()
+      const token = localStorage.getItem('openbi_token')
+
+      const resp = await fetch(`/api/projects/${projectId}/chat/multi`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          session_id: existingSessionId || null,
+          agent_ids: agentIds,
+          message,
+        }),
+        signal: abortRef.current.signal,
+      })
+
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`)
+
+      const reader = resp.body?.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let accumContent = ''
+      let finalMessageId = assistantId
+      let newSessionId = existingSessionId || null
+
+      if (reader) {
+        outer: while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || ''
+          let currentEvent = ''
+          for (const line of lines) {
+            if (line.startsWith('event: ')) { currentEvent = line.slice(7).trim(); continue }
+            if (!line.startsWith('data: ')) continue
+            try {
+              const payload = JSON.parse(line.slice(6))
+              switch (currentEvent) {
+                case 'thinking': setCurrentStatus(payload.step || 'Thinking...'); break
+                case 'answer': accumContent = payload.content || ''; break
+                case 'done':
+                  if (payload.session_id) newSessionId = payload.session_id
+                  if (payload.message_id) finalMessageId = payload.message_id
+                  break outer
+              }
+              setMessages(prev => {
+                const updated = [...prev]
+                const idx = updated.findIndex(m => m.id === assistantId)
+                if (idx !== -1) updated[idx] = { ...updated[idx], id: finalMessageId, content: accumContent || updated[idx].content, isStreaming: true }
+                return updated
+              })
+            } catch { /* ignore */ }
+          }
+        }
+      }
+
+      setMessages(prev => {
+        const updated = [...prev]
+        const idx = updated.findIndex(m => m.id === assistantId || m.id === finalMessageId)
+        if (idx !== -1) updated[idx] = { ...updated[idx], id: finalMessageId, content: accumContent, isStreaming: false }
+        return updated
+      })
+      if (newSessionId) setSessionId(newSessionId)
+    } catch (err: any) {
+      if (err.name === 'AbortError') return
+      setMessages(prev => {
+        const updated = [...prev]
+        const idx = updated.findIndex(m => m.id === assistantId)
+        if (idx !== -1) updated[idx] = { ...updated[idx], content: `Error: ${err.message || 'Failed to get response'}`, isStreaming: false }
+        return updated
+      })
+    } finally {
+      setIsLoading(false)
+      setCurrentStatus('')
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   return {
     messages,
     isLoading,
     currentStatus,
     sessionId,
     sendMessage,
+    sendMultiMessage,
     setMessages,
     clearMessages,
     updateMessageChart,
