@@ -10,7 +10,7 @@
   </g>
 </svg>
 
-# OpenBI — AI-Native Business Intelligence Platform
+# OpenBI - AI-Native Business Intelligence Platform
 
 **Self-hosted · Open Source · No SQL Required**
 
