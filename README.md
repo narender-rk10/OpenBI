@@ -39,21 +39,75 @@ Connect 90+ data sources, chat with AI agents, build interactive dashboards, and
 
 ## Screenshots
 
-| Dashboard View | AI Chat |
-|---|---|
-| ![Dashboard View](docs/screenshots/dashboard_view.png) | ![AI Chat](docs/screenshots/ai_chat.png) |
+### Landing Page
+![Landing Page](docs/screenshots/1.png)
 
-| Knowledge Bases | Agents Page |
-|---|---|
-| ![Knowledge Bases](docs/screenshots/knowledge_bases.png) | ![Agents](docs/screenshots/agents.png) |
+### Projects
+![Projects](docs/screenshots/2_projects.png)
 
-| PPTX Export | Scheduled Reports |
-|---|---|
-| ![PPTX Export](docs/screenshots/pptx_export.png) | ![Schedules](docs/screenshots/schedules.png) |
+### Data Sources
 
-| Dashboard Filters | PDF History |
+| Add Source | Connected Sources | Table Preview |
+|---|---|---|
+| ![Add Data Source](docs/screenshots/3a_data_.png) | ![Connected Sources](docs/screenshots/3b_data.png) | ![Table Preview](docs/screenshots/3c_data_.png) |
+
+### Knowledge Bases
+
+| KB List | Chunk Viewer |
 |---|---|
-| ![Filters](docs/screenshots/dashboard_filters.png) | ![PDF History](docs/screenshots/pdf_history.png) |
+| ![Knowledge Bases](docs/screenshots/4_kb.png) | ![KB Chunks](docs/screenshots/4b_kb.png) |
+
+### AI Agents
+
+| Agent List | Create Agent |
+|---|---|
+| ![AI Agents](docs/screenshots/5b_ai_agents.png) | ![Create Agent](docs/screenshots/5a_ai_agents.png) |
+
+### Chat
+
+| Table Result | Auto-Generated Chart |
+|---|---|
+| ![Chat Table](docs/screenshots/6a_chat_table.png) | ![Chat Chart](docs/screenshots/6b_chat_chart.png) |
+
+| SQL Query View | Add to Dashboard |
+|---|---|
+| ![SQL Query](docs/screenshots/6c_chat_sql_query.png) | ![Add to Dashboard](docs/screenshots/6d_add_in_dash.png) |
+
+### Dashboards
+
+| Dashboard List | Dashboard View |
+|---|---|
+| ![Dashboards](docs/screenshots/7a_dashabord_overview.png) | ![Dashboard](docs/screenshots/7b_dashabord.png) |
+
+### Export
+
+| PDF Export | PPTX Export (Presenton AI) |
+|---|---|
+| ![PDF Export](docs/screenshots/8_pdf_Export.png) | ![PPTX Export](docs/screenshots/9_pptx_Export.png) |
+
+### Scheduled Reports
+
+| Schedule Builder | Run History |
+|---|---|
+| ![Schedule Builder](docs/screenshots/10a_scheule.png) | ![Run History](docs/screenshots/10b_scheule_history.png) |
+
+### Observability & Analytics
+
+| Chat Analytics | Langfuse Query Log |
+|---|---|
+| ![Chat Analytics](docs/screenshots/11a_llm_observalibility%20.png) | ![Langfuse](docs/screenshots/11b_llm_observalibility%20.png) |
+
+### Settings
+
+| LLM Configuration | User Management | Telegram Integration |
+|---|---|---|
+| ![LLM Config](docs/screenshots/12_llm_config.png) | ![User Management](docs/screenshots/13_user_management.png) | ![Telegram](docs/screenshots/14a_tg_config.png) |
+
+### Telegram Bot (Mobile)
+
+| Help & Commands | Connect & Setup | Projects & Agents | Dashboards | Reports |
+|---|---|---|---|---|
+| ![TG Help](docs/screenshots/14c_IMG_1956.png) | ![TG Connect](docs/screenshots/14c_IMG_1957.png) | ![TG Agents](docs/screenshots/14c_IMG_1958.png) | ![TG Dashboards](docs/screenshots/14c_IMG_1959.png) | ![TG Reports](docs/screenshots/14c_IMG_1960.png) |
 
 ---
 
