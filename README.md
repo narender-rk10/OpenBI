@@ -45,69 +45,85 @@ Connect 90+ data sources, chat with AI agents, build interactive dashboards, and
 ### Projects
 ![Projects](docs/screenshots/2_projects.png)
 
-### Data Sources
+### Data Sources — Add Source
+![Add Data Source](docs/screenshots/3a_data_.png)
 
-| Add Source | Connected Sources | Table Preview |
-|---|---|---|
-| ![Add Data Source](docs/screenshots/3a_data_.png) | ![Connected Sources](docs/screenshots/3b_data.png) | ![Table Preview](docs/screenshots/3c_data_.png) |
+### Data Sources — Connected Sources
+![Connected Sources](docs/screenshots/3b_data.png)
+
+### Data Sources — Table Preview
+![Table Preview](docs/screenshots/3c_data_.png)
 
 ### Knowledge Bases
+![Knowledge Bases](docs/screenshots/4_kb.png)
 
-| KB List | Chunk Viewer |
-|---|---|
-| ![Knowledge Bases](docs/screenshots/4_kb.png) | ![KB Chunks](docs/screenshots/4b_kb.png) |
+### Knowledge Base — Chunk Viewer
+![KB Chunks](docs/screenshots/4b_kb.png)
 
 ### AI Agents
+![AI Agents](docs/screenshots/5b_ai_agents.png)
 
-| Agent List | Create Agent |
-|---|---|
-| ![AI Agents](docs/screenshots/5b_ai_agents.png) | ![Create Agent](docs/screenshots/5a_ai_agents.png) |
+### AI Agents — Create Agent
+![Create Agent](docs/screenshots/5a_ai_agents.png)
 
-### Chat
+### Chat — Table Result
+![Chat Table](docs/screenshots/6a_chat_table.png)
 
-| Table Result | Auto-Generated Chart |
-|---|---|
-| ![Chat Table](docs/screenshots/6a_chat_table.png) | ![Chat Chart](docs/screenshots/6b_chat_chart.png) |
+### Chat — Auto-Generated Chart
+![Chat Chart](docs/screenshots/6b_chat_chart.png)
 
-| SQL Query View | Add to Dashboard |
-|---|---|
-| ![SQL Query](docs/screenshots/6c_chat_sql_query.png) | ![Add to Dashboard](docs/screenshots/6d_add_in_dash.png) |
+### Chat — SQL Query View
+![SQL Query](docs/screenshots/6c_chat_sql_query.png)
+
+### Chat — Add to Dashboard
+![Add to Dashboard](docs/screenshots/6d_add_in_dash.png)
 
 ### Dashboards
+![Dashboards](docs/screenshots/7a_dashabord_overview.png)
 
-| Dashboard List | Dashboard View |
-|---|---|
-| ![Dashboards](docs/screenshots/7a_dashabord_overview.png) | ![Dashboard](docs/screenshots/7b_dashabord.png) |
+### Dashboard View
+![Dashboard](docs/screenshots/7b_dashabord.png)
 
-### Export
+### PDF Export
+![PDF Export](docs/screenshots/8_pdf_Export.png)
 
-| PDF Export | PPTX Export (Presenton AI) |
-|---|---|
-| ![PDF Export](docs/screenshots/8_pdf_Export.png) | ![PPTX Export](docs/screenshots/9_pptx_Export.png) |
+### PPTX Export (Presenton AI)
+![PPTX Export](docs/screenshots/9_pptx_Export.png)
 
 ### Scheduled Reports
+![Schedule Builder](docs/screenshots/10a_scheule.png)
 
-| Schedule Builder | Run History |
-|---|---|
-| ![Schedule Builder](docs/screenshots/10a_scheule.png) | ![Run History](docs/screenshots/10b_scheule_history.png) |
+### Schedule Run History
+![Run History](docs/screenshots/10b_scheule_history.png)
 
-### Observability & Analytics
+### Chat Analytics
+![Chat Analytics](docs/screenshots/11a_llm_observalibility%20.png)
 
-| Chat Analytics | Langfuse Query Log |
-|---|---|
-| ![Chat Analytics](docs/screenshots/11a_llm_observalibility%20.png) | ![Langfuse](docs/screenshots/11b_llm_observalibility%20.png) |
+### Langfuse Query Log
+![Langfuse](docs/screenshots/11b_llm_observalibility%20.png)
 
-### Settings
+### Settings — LLM Configuration
+![LLM Config](docs/screenshots/12_llm_config.png)
 
-| LLM Configuration | User Management | Telegram Integration |
-|---|---|---|
-| ![LLM Config](docs/screenshots/12_llm_config.png) | ![User Management](docs/screenshots/13_user_management.png) | ![Telegram](docs/screenshots/14a_tg_config.png) |
+### Settings — User Management
+![User Management](docs/screenshots/13_user_management.png)
+
+### Settings — Telegram Integration
+![Telegram](docs/screenshots/14a_tg_config.png)
 
 ### Telegram Bot (Mobile)
 
-| Help & Commands | Connect & Setup | Projects & Agents | Dashboards | Reports |
-|---|---|---|---|---|
-| ![TG Help](docs/screenshots/14c_IMG_1956.png) | ![TG Connect](docs/screenshots/14c_IMG_1957.png) | ![TG Agents](docs/screenshots/14c_IMG_1958.png) | ![TG Dashboards](docs/screenshots/14c_IMG_1959.png) | ![TG Reports](docs/screenshots/14c_IMG_1960.png) |
+| Help & Commands | Connect & Setup |
+|---|---|
+| ![TG Help](docs/screenshots/14c_IMG_1956.png) | ![TG Connect](docs/screenshots/14c_IMG_1957.png) |
+
+| Projects & Agents | Dashboards |
+|---|---|
+| ![TG Agents](docs/screenshots/14c_IMG_1958.png) | ![TG Dashboards](docs/screenshots/14c_IMG_1959.png) |
+
+| Reports | |
+|---|---|
+| ![TG Reports](docs/screenshots/14c_IMG_1960.png) | |
 
 ---
 
