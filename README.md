@@ -39,11 +39,11 @@ Connect 90+ data sources, chat with AI agents, build interactive dashboards, and
 
 ## Screenshots
 
-### Landing Page
-![Landing Page](docs/screenshots/1.png)
+### Landing Page & Projects
 
-### Projects
-![Projects](docs/screenshots/2_projects.png)
+| Landing Page | Projects |
+|---|---|
+| ![Landing Page](docs/screenshots/1.png) | ![Projects](docs/screenshots/2_projects.png) |
 
 ### Data Sources
 
