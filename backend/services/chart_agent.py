@@ -16,6 +16,7 @@ class ChartAgent:
         user_request: str = "auto",
         brand_colors: list[str] | None = None,
         current_config: dict | None = None,
+        history: list[dict] | None = None,
     ) -> dict:
         """Generate or update G2 chart spec from data."""
         if brand_colors is None:
@@ -35,6 +36,10 @@ class ChartAgent:
         context = ""
         if current_config:
             context = f"\nCURRENT CHART CONFIG (user wants to modify this):\n{json.dumps(current_config)}\n"
+
+        if history:
+            turns = "\n".join(f"{h['role'].upper()}: {h['content']}" for h in history[-8:])
+            context += f"\nPrevious conversation (use for context/memory):\n{turns}\n"
 
         prompt = CHART_AGENT_SYSTEM_PROMPT.format(
             columns=json.dumps(columns),
@@ -62,6 +67,7 @@ class ChartAgent:
         columns: list[str],
         rows: list[list],
         brand_colors: list[str] | None = None,
+        history: list[dict] | None = None,
     ) -> dict:
         """Modify existing chart based on user instruction."""
         return await self.generate_chart(
@@ -70,6 +76,7 @@ class ChartAgent:
             user_request=user_message,
             brand_colors=brand_colors,
             current_config=current_config,
+            history=history,
         )
 
     def _detect_types(self, columns: list[str], rows: list[list]) -> dict:

@@ -28,6 +28,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch { /* ignore */ }
     }
     setIsLoading(false)
+
+    const handleUnauthorized = () => setUser(null)
+    window.addEventListener('openbi:unauthorized', handleUnauthorized)
+    return () => window.removeEventListener('openbi:unauthorized', handleUnauthorized)
   }, [])
 
   const login = async (email: string, password: string) => {

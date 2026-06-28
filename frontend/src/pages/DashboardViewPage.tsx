@@ -237,12 +237,38 @@ export default function DashboardViewPage() {
       }
     }
     loadGridstack()
+  // Reinit only when widget IDs change (add/remove) or edit mode toggles.
+  // Position changes are handled by updating the widgets state in the change handler,
+  // but must NOT retrigger initGrid (would loop and reset positions).
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [widgets, isEditMode])
+  }, [widgets.map(w => w.widget_id).join(','), isEditMode])
 
   const initGrid = () => {
-    if (gsRef.current) { gsRef.current.destroy(false); gsRef.current = null }
+    // Capture live positions from GridStack's internal state before destroy.
+    // destroy(false) can clear/reset gs-* attributes, so we re-stamp them
+    // onto the DOM elements afterward so GridStack.init() reads the correct layout.
+    const livePos: Record<string, { x: number; y: number; w: number; h: number }> = {}
+    if (gsRef.current) {
+      gsRef.current.getGridItems().forEach((el: HTMLElement) => {
+        const node = (el as any).gridstackNode
+        const id = el.getAttribute('gs-id') || el.id.replace(/^gs-/, '')
+        if (node && id) livePos[id] = { x: node.x, y: node.y, w: node.w, h: node.h }
+      })
+      gsRef.current.destroy(false)
+      gsRef.current = null
+    }
     if (!window.GridStack || !gridRef.current) return
+
+    // Re-stamp live positions onto DOM so init reads updated layout
+    Object.entries(livePos).forEach(([id, pos]) => {
+      const el = document.getElementById(`gs-${id}`)
+      if (el) {
+        el.setAttribute('gs-x', String(pos.x))
+        el.setAttribute('gs-y', String(pos.y))
+        el.setAttribute('gs-w', String(pos.w))
+        el.setAttribute('gs-h', String(pos.h))
+      }
+    })
 
     const gs = window.GridStack.init({
       column: 12, cellHeight: 80, margin: 8, float: false,
@@ -254,22 +280,22 @@ export default function DashboardViewPage() {
     }, gridRef.current)
 
     gsRef.current = gs
-    gs.batchUpdate()
-    widgets.forEach(w => {
-      const el = document.getElementById(`gs-${w.widget_id}`)
-      if (el) gs.makeWidget(el)
-    })
-    gs.commit()
 
     gs.on('resizestop', () => {
       gs.compact()
     })
 
     gs.on('change', (_: any, items: any[]) => {
-      const layout = items.map((item: any) => ({
-        widget_id: item.id, x: item.x, y: item.y, w: item.w, h: item.h,
+      const posMap: Record<string, {x: number, y: number, w: number, h: number}> = {}
+      items.forEach((item: any) => { if (item.id) posMap[item.id] = { x: item.x, y: item.y, w: item.w, h: item.h } })
+      // Keep React state in sync so positions survive the re-render triggered by isEditMode toggle
+      setWidgets(prev => prev.map(w => {
+        const p = posMap[w.widget_id]
+        return p ? { ...w, position: { ...w.position, ...p } } : w
       }))
-      api.put(`/api/projects/${projectId}/dashboards/${dashboardId}/layout`, { layout }).catch(() => {})
+      api.put(`/api/projects/${projectId}/dashboards/${dashboardId}/layout`, {
+        layout: items.map((item: any) => ({ widget_id: item.id, x: item.x, y: item.y, w: item.w, h: item.h })),
+      }).catch(() => {})
     })
   }
 
@@ -636,6 +662,8 @@ export default function DashboardViewPage() {
       {(((dashboard?.global_filters && dashboard.global_filters.length > 0) || isEditMode)) && (
         <DashboardFilters
           filters={dashboard?.global_filters || []}
+          projectId={projectId!}
+          dashboardId={dashboardId!}
           onFilterChange={handleFilterChange}
           onResetAll={handleResetFilters}
           isEditMode={isEditMode}
@@ -703,7 +731,8 @@ export default function DashboardViewPage() {
         projectId={projectId!}
         dashboardId={dashboardId!}
         selectedWidgetId={selectedWidgetId}
-        onWidgetUpdated={handleWidgetUpdated}
+        selectedWidgetType={widgets.find(w => w.widget_id === selectedWidgetId)?.display_type ?? null}
+onWidgetUpdated={handleWidgetUpdated}
       />
 
       {/* ── Expanded widget modal ── */}

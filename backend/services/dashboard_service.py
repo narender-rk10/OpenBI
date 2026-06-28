@@ -17,42 +17,20 @@ class DashboardService:
         options = None
 
         if filter_config["type"] in ("select", "multi_select"):
-            widget = await self._find_widget_with_column(dashboard_id, filter_config["column"], db)
-            if widget:
-                col = filter_config["column"]
-                db_name, table = await self._resolve_db_and_table(widget, db)
-                if db_name and table:
-                    try:
-                        result = await mindsdb.sql_query(f"SELECT DISTINCT `{col}` FROM {db_name}.{table} ORDER BY `{col}` LIMIT 100")
-                        options = [row[0] for row in result.get("data", [])]
-                    except Exception:
-                        options = []
+            # Always read distinct values directly from widget cached_data — querying
+            # the raw table fails for computed columns, aliases, and JOINs, and
+            # MindsDB's information_schema is in a different namespace than user data.
+            options = await self._options_from_cached_data(dashboard_id, filter_config["column"], db)
 
         elif filter_config["type"] == "date_range":
             widget = await self._find_widget_with_column(dashboard_id, filter_config["column"], db)
             if widget:
-                col = filter_config["column"]
-                db_name, table = await self._resolve_db_and_table(widget, db)
-                if db_name and table:
-                    try:
-                        result = await mindsdb.sql_query(f"SELECT MIN(`{col}`), MAX(`{col}`) FROM {db_name}.{table}")
-                        if result.get("data"):
-                            options = {"min": str(result["data"][0][0]), "max": str(result["data"][0][1])}
-                    except Exception:
-                        options = {}
+                options = self._cached_min_max(widget, filter_config["column"], as_str=True)
 
         elif filter_config["type"] == "number_range":
             widget = await self._find_widget_with_column(dashboard_id, filter_config["column"], db)
             if widget:
-                col = filter_config["column"]
-                db_name, table = await self._resolve_db_and_table(widget, db)
-                if db_name and table:
-                    try:
-                        result = await mindsdb.sql_query(f"SELECT MIN(`{col}`), MAX(`{col}`) FROM {db_name}.{table}")
-                        if result.get("data"):
-                            options = {"min": result["data"][0][0], "max": result["data"][0][1]}
-                    except Exception:
-                        options = {}
+                options = self._cached_min_max(widget, filter_config["column"], as_str=False)
 
         new_filter = {
             "id": filter_id,
@@ -160,6 +138,41 @@ class DashboardService:
             query = query.rstrip(";") + f" WHERE {condition}"
 
         return query
+
+    async def _options_from_cached_data(self, dashboard_id: str, col: str, db) -> list[str]:
+        """Extract sorted distinct values for `col` from all widgets' cached_data."""
+        widgets = await db.widgets.find({"dashboard_id": ObjectId(dashboard_id)}).to_list(100)
+        col_lower = col.lower()
+        vals: set[str] = set()
+        for w in widgets:
+            data = w.get("cached_data") or {}
+            cols = data.get("columns") or []
+            rows = data.get("rows") or []
+            try:
+                idx = next(i for i, c in enumerate(cols) if c.lower() == col_lower)
+                for r in rows:
+                    v = r[idx] if isinstance(r, (list, tuple)) and idx < len(r) else (r.get(col) if isinstance(r, dict) else None)
+                    if v not in (None, ""):
+                        vals.add(str(v))
+            except StopIteration:
+                pass
+        return sorted(vals)[:200]
+
+    @staticmethod
+    def _cached_min_max(widget, col: str, as_str: bool) -> dict:
+        """Extract min/max for a column from widget cached_data."""
+        data = widget.get("cached_data") or {}
+        cols = data.get("columns") or []
+        rows = data.get("rows") or []
+        col_lower = col.lower()
+        idx = next((i for i, c in enumerate(cols) if c.lower() == col_lower), -1)
+        if idx == -1 or not rows:
+            return {}
+        vals = [r[idx] for r in rows if idx < len(r) and r[idx] not in (None, "")]
+        if not vals:
+            return {}
+        mn, mx = str(min(vals)) if as_str else min(vals), str(max(vals)) if as_str else max(vals)
+        return {"min": mn, "max": mx}
 
     async def _find_widget_with_column(self, dashboard_id: str, column: str, db):
         widgets = await db.widgets.find({"dashboard_id": ObjectId(dashboard_id)}).to_list(100)

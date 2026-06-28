@@ -30,7 +30,9 @@ interface Props {
 // ── Job row ──────────────────────────────────────────────────────────────────
 
 function timeAgo(iso: string) {
-  const diff = Date.now() - new Date(iso).getTime()
+  // Ensure the ISO string is treated as UTC (append Z if missing)
+  const utcIso = iso.endsWith('Z') || iso.includes('+') ? iso : iso + 'Z'
+  const diff = Date.now() - new Date(utcIso).getTime()
   const min = Math.floor(diff / 60_000)
   if (min < 1) return 'just now'
   if (min < 60) return `${min}m ago`
@@ -85,9 +87,9 @@ function JobRow({ job, dashboardName }: { job: PptxJob; dashboardName: string })
         <span
           className="text-[10px] max-w-[8rem] truncate shrink-0"
           style={{ color: 'var(--text-muted)' }}
-          title={job.error}
+          title={String(job.error)}
         >
-          {job.error}
+          {String(job.error)}
         </span>
       )}
     </div>

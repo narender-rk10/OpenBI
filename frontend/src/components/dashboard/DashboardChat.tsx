@@ -7,6 +7,7 @@ interface DashboardChatProps {
   projectId: string
   dashboardId: string
   selectedWidgetId: string | null
+  selectedWidgetType: string | null
   onWidgetUpdated: (widgetId: string, update: any) => void
 }
 
@@ -19,23 +20,38 @@ export default function DashboardChat({
   projectId,
   dashboardId,
   selectedWidgetId,
+  selectedWidgetType,
   onWidgetUpdated,
 }: DashboardChatProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [inputValue, setInputValue] = useState('')
-  const [chatHistory, setChatHistory] = useState<ChatEntry[]>([])
+  // History keyed by widgetId so chart-agent and table-agent conversations stay separate
+  const [historyByWidget, setHistoryByWidget] = useState<Record<string, ChatEntry[]>>({})
   const [loading, setLoading] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const historyLoaded = useRef(false)
 
-  // Load persisted chat history the first time the panel is opened.
+  const chatHistory = selectedWidgetId ? (historyByWidget[selectedWidgetId] ?? []) : []
+
+  const pushEntry = (widgetId: string, entry: ChatEntry) =>
+    setHistoryByWidget(prev => ({
+      ...prev,
+      [widgetId]: [...(prev[widgetId] ?? []), entry],
+    }))
+
+  // Load persisted chat history the first time the panel is opened, grouped by widget.
   useEffect(() => {
     if (!isOpen || historyLoaded.current) return
     historyLoaded.current = true
     api.get(`/api/projects/${projectId}/dashboards/${dashboardId}/chat/history`)
       .then(({ data }) => {
-        const msgs = (data.messages || []).map((m: any) => ({ role: m.role, content: m.content }))
-        if (msgs.length) setChatHistory(msgs)
+        const grouped: Record<string, ChatEntry[]> = {}
+        for (const m of (data.messages || [])) {
+          const key = m.widget_id ?? '__global__'
+          if (!grouped[key]) grouped[key] = []
+          grouped[key].push({ role: m.role, content: m.content })
+        }
+        if (Object.keys(grouped).length) setHistoryByWidget(grouped)
       })
       .catch(() => { /* history is best-effort */ })
   }, [isOpen, projectId, dashboardId])
@@ -46,30 +62,28 @@ export default function DashboardChat({
     setInputValue('')
 
     if (!selectedWidgetId) {
-      setChatHistory(prev => [...prev,
-        { role: 'user', content: msg },
-        { role: 'assistant', content: '⚠ Please click a widget first to select it, then I can modify it.' },
-      ])
+      // No widget selected — show in a neutral bucket, not per-widget
       return
     }
 
-    setChatHistory(prev => [...prev, { role: 'user', content: msg }])
+    const wid = selectedWidgetId
+    pushEntry(wid, { role: 'user', content: msg })
     setLoading(true)
 
     try {
       const { data } = await api.post(
         `/api/projects/${projectId}/dashboards/${dashboardId}/chat`,
-        { message: msg, widget_id: selectedWidgetId },
+        { message: msg, widget_id: wid, widget_type: selectedWidgetType },
       )
 
       if (data.needs_selection) {
-        setChatHistory(prev => [...prev, { role: 'assistant', content: data.response }])
+        pushEntry(wid, { role: 'assistant', content: data.response })
         return
       }
 
       // Operation not supported by AntV G2 / S2 — show the helpful hint.
       if (data.unsupported) {
-        setChatHistory(prev => [...prev, { role: 'assistant', content: data.response }])
+        pushEntry(wid, { role: 'assistant', content: data.response })
         return
       }
 
@@ -78,14 +92,24 @@ export default function DashboardChat({
       if (displayType === 'chart' && data.chart_config) update.chart_config = data.chart_config
       if (displayType === 'table' && data.table_config) update.table_config = data.table_config
 
-      onWidgetUpdated(selectedWidgetId, update)
-      setChatHistory(prev => [...prev, {
+      // If the table agent flagged not_supported, don't apply — just tell the user
+      const tableNotSupported = displayType === 'table' && data.table_config?.not_supported
+      if (tableNotSupported) {
+        pushEntry(wid, {
+          role: 'assistant',
+          content: `⚠️ Not supported: ${data.table_config.changes_made || 'This operation cannot be applied to the table.'}`,
+        })
+        return
+      }
+
+      onWidgetUpdated(wid, update)
+      pushEntry(wid, {
         role: 'assistant',
         content: `✓ ${data.changes_made || 'Widget updated successfully'}`,
-      }])
+      })
     } catch (err: any) {
       const detail = err.response?.data?.detail || err.message
-      setChatHistory(prev => [...prev, { role: 'assistant', content: `Error: ${detail}` }])
+      pushEntry(wid, { role: 'assistant', content: `Error: ${detail}` })
     } finally {
       setLoading(false)
     }
@@ -123,7 +147,7 @@ export default function DashboardChat({
             {chatHistory.length === 0 && (
               <p className="text-xs py-2" style={{ color: 'var(--text-muted)' }}>
                 {selectedWidgetId
-                  ? 'Describe what you want to change, e.g. "make it a pie chart" or "sort by revenue desc".'
+                  ? `No conversation yet for this widget. Try "make it a pie chart", "sort by revenue desc", or "uppercase the names column".`
                   : 'Click a widget on the dashboard to select it, then describe your changes here.'}
               </p>
             )}

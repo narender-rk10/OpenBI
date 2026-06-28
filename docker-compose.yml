@@ -14,6 +14,9 @@ services:
         condition: service_healthy
     networks:
       - openbi-network
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     volumes:
       - uploads:/app/uploads
       - ./backend:/app/backend
@@ -35,7 +38,6 @@ services:
       - backend
     environment:
       VITE_API_URL: ""
-      VITE_WS_URL: "ws://localhost:8000"
       API_PROXY_TARGET: "http://backend:8000"
       WS_PROXY_TARGET: "ws://backend:8000"
       PRESENTON_PROXY_TARGET: "http://presenton:80"
@@ -94,6 +96,9 @@ services:
       AUTH_PASSWORD: ${PRESENTON_PASSWORD:-openbi_pptx_2024}
     volumes:
       - presenton_data:/app_data
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     networks:
       - openbi-network
 

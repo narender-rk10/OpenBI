@@ -148,8 +148,8 @@ async def chat(
                                 {"id": g_msg_id, "role": "assistant", "content": _OPENBI_GREETING, "agent_name": agent["name"], "sql_query": None, "data": None, "chart_config": None, "table_config": None, "timestamp": now_g},
                             ]
                         },
-                        "$set": {"updated_at": now_g},
-                    }
+                    },
+                    "$set": {"updated_at": now_g},
                 },
             )
             yield _sse("done", {"session_id": str(session["_id"]), "message_id": g_msg_id, "latency_ms": g_latency})

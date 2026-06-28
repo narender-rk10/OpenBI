@@ -105,6 +105,7 @@ class WidgetAgentRequest(BaseModel):
 class DashboardChatRequest(BaseModel):
     message: str
     widget_id: str | None = None
+    widget_type: str | None = None  # "chart" | "table" — authoritative from frontend
 
 
 class PresentonGenerateRequest(BaseModel):
@@ -189,6 +190,37 @@ async def get_dashboard(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dashboard not found")
 
     widgets = await db.widgets.find({"dashboard_id": ObjectId(dashboard_id)}).to_list(100)
+
+    # Auto-repair filter options: if a select/multi_select filter has no stored options,
+    # compute them from widget cached_data and persist so the UI always has values.
+    filters = dashboard.get("global_filters", [])
+    for f in filters:
+        if f.get("type") not in ("select", "multi_select"):
+            continue
+        if f.get("options"):  # already populated
+            continue
+        col = f["column"]
+        col_lower = col.lower()
+        vals: set[str] = set()
+        for w in widgets:
+            data = w.get("cached_data") or {}
+            cols = data.get("columns") or []
+            rows = data.get("rows") or []
+            try:
+                idx = next(i for i, c in enumerate(cols) if c.lower() == col_lower)
+                for r in rows:
+                    if idx < len(r) and r[idx] not in (None, ""):
+                        vals.add(str(r[idx]))
+            except StopIteration:
+                pass
+        if vals:
+            sorted_vals = sorted(vals)
+            f["options"] = sorted_vals
+            await db.dashboards.update_one(
+                {"_id": ObjectId(dashboard_id), "global_filters.id": f["id"]},
+                {"$set": {"global_filters.$.options": sorted_vals}},
+            )
+
     result = _serialize_dashboard(dashboard)
     result["widgets"] = [_serialize_widget(w) for w in widgets]
     return result
@@ -470,6 +502,31 @@ async def add_filter(
 ):
     new_filter = await dashboard_service.add_filter(dashboard_id, body.model_dump(), db)
     return new_filter
+
+
+@router.post("/{dashboard_id}/filters/{filter_id}/refresh-options")
+async def refresh_filter_options(
+    project_id: str,
+    dashboard_id: str,
+    filter_id: str,
+    user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Re-compute and persist filter options from widget cached_data."""
+    dashboard = await db.dashboards.find_one({"_id": ObjectId(dashboard_id)})
+    f = next((x for x in dashboard.get("global_filters", []) if x["id"] == filter_id), None)
+    if not f:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Filter not found")
+
+    if f["type"] not in ("select", "multi_select"):
+        return {"options": f.get("options")}
+
+    options = await dashboard_service._options_from_cached_data(dashboard_id, f["column"], db)
+    await db.dashboards.update_one(
+        {"_id": ObjectId(dashboard_id), "global_filters.id": filter_id},
+        {"$set": {"global_filters.$.options": options}},
+    )
+    return {"options": options}
 
 
 @router.put("/{dashboard_id}/filters/{filter_id}")
@@ -757,6 +814,45 @@ def _detect_unsupported(message: str) -> str | None:
     return None
 
 
+async def _classify_widget_intent(message: str, current_type: str, org) -> str:
+    """Ask the LLM whether the user wants to keep the widget type or convert it.
+
+    Returns 'keep', 'chart', or 'table'.  Falls back to 'keep' on any error."""
+    from backend.services.llm_client import call_llm
+    prompt = (
+        f"You are a routing assistant. A user is chatting with a {current_type} widget.\n"
+        f'User message: "{message}"\n\n'
+        "Does the user want to:\n"
+        "A) Modify / format / update the existing widget (keep its current type)\n"
+        "B) Convert it to a CHART (bar, line, pie, scatter, area, column, etc.)\n"
+        "C) Convert it to a TABLE\n\n"
+        "Reply with exactly ONE word: keep  OR  chart  OR  table"
+    )
+    try:
+        result = (await call_llm(prompt, org)).strip().lower()
+        if "chart" in result:
+            return "chart"
+        if "table" in result:
+            return "table"
+        return "keep"
+    except Exception:
+        return "keep"
+
+
+async def _load_widget_history(
+    db: AsyncIOMotorDatabase, dashboard_id: str, widget_id: str, limit: int = 10
+) -> list[dict]:
+    """Return the most recent `limit` messages for a specific widget."""
+    session = await db.dashboard_chat_sessions.find_one({"dashboard_id": ObjectId(dashboard_id)})
+    messages = (session or {}).get("messages", [])
+    widget_msgs = [
+        {"role": m["role"], "content": m["content"]}
+        for m in messages
+        if m.get("widget_id") == widget_id
+    ]
+    return widget_msgs[-limit:]
+
+
 async def _save_dashboard_chat_turn(
     db: AsyncIOMotorDatabase,
     dashboard_id: str,
@@ -917,19 +1013,22 @@ async def dashboard_chat(
             except Exception as e:
                 import logging; logging.getLogger(__name__).warning("SQL mod failed: %s", e)
 
-    # Decide routing: prefer explicit chart/table keywords, fall back to display_type
-    chart_keywords = {"chart", "pie", "bar", "line", "area", "scatter", "histogram", "column", "graph", "plot", "visualize", "visualization"}
-    table_keywords = {"table", "sort", "filter", "conditional", "highlight", "color row", "format", "column width"}
+    # Use widget_type from frontend (authoritative); fall back to DB value.
+    current_display = body.widget_type or widget.get("display_type", "chart")
 
-    force_chart = any(kw in msg_lower for kw in chart_keywords)
-    force_table = any(kw in msg_lower for kw in table_keywords)
+    # Load this widget's conversation history for memory context.
+    widget_history = await _load_widget_history(db, dashboard_id, body.widget_id)
 
-    use_table = force_table or (not force_chart and widget.get("display_type") == "table")
+    # LLM decides: keep the current type, or convert to chart/table.
+    intent = await _classify_widget_intent(body.message, current_display, org)
+    target_type = intent if intent != "keep" else current_display
+    use_table = (target_type == "table")
 
     if use_table:
         current_config = widget.get("table_config") or {}
         new_config = await table_agent.process(
-            body.message, current_config, data.get("columns", []), data.get("rows", [])
+            body.message, current_config, data.get("columns", []), data.get("rows", []),
+            history=widget_history,
         )
         await db.widgets.update_one(
             {"_id": widget["_id"]},
@@ -954,11 +1053,13 @@ async def dashboard_chat(
         current_config = widget.get("chart_config")
         if current_config:
             new_config = await chart_agent.modify_chart(
-                body.message, current_config, data.get("columns", []), data.get("rows", []), brand_colors
+                body.message, current_config, data.get("columns", []), data.get("rows", []),
+                brand_colors, history=widget_history,
             )
         else:
             new_config = await chart_agent.generate_chart(
-                data.get("columns", []), data.get("rows", []), body.message, brand_colors
+                data.get("columns", []), data.get("rows", []), body.message, brand_colors,
+                history=widget_history,
             )
         await db.widgets.update_one(
             {"_id": widget["_id"]},
@@ -1283,9 +1384,9 @@ async def list_pptx_jobs(
             "presentation_id": d.get("presentation_id"),
             "edit_path": d.get("edit_path"),
             "download_path": d.get("download_path"),
-            "error": d.get("error"),
-            "created_at": d["created_at"].isoformat(),
-            "updated_at": d["updated_at"].isoformat(),
+            "error": str(d["error"]) if d.get("error") is not None else None,
+            "created_at": d["created_at"].isoformat() + "Z",
+            "updated_at": d["updated_at"].isoformat() + "Z",
         }
         for d in docs
     ]

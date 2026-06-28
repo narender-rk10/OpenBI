@@ -43,11 +43,12 @@ export function useWebSocket(): UseWebSocketReturn {
     wsRef.current = ws
 
     ws.onopen = () => {
+      // Guard against React Strict Mode's double-invoke: if wsRef moved on to a
+      // newer socket, this is a stale open event — ignore it.
+      if (wsRef.current !== ws) { ws.close(); return }
       setIsConnected(true)
       reconnectDelay.current = 1000
-      // Clear previous heartbeat
       if (heartbeatRef.current) clearInterval(heartbeatRef.current)
-      // Start heartbeat
       heartbeatRef.current = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: 'ping' }))
@@ -59,6 +60,7 @@ export function useWebSocket(): UseWebSocketReturn {
     }
 
     ws.onmessage = (event) => {
+      if (wsRef.current !== ws) return
       try {
         const msg = JSON.parse(event.data)
         if (msg.type === 'pong') return
@@ -67,6 +69,10 @@ export function useWebSocket(): UseWebSocketReturn {
     }
 
     ws.onclose = () => {
+      // If wsRef already points to a newer socket (Strict Mode double-invoke),
+      // this stale close must NOT trigger reconnect or update connected state.
+      if (wsRef.current !== ws) return
+      wsRef.current = null
       setIsConnected(false)
       if (shouldReconnect.current && dashboardIdRef.current) {
         reconnectTimeout.current = setTimeout(() => {

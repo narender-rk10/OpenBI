@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Download, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react'
 
 interface S2TableProps {
@@ -20,6 +20,7 @@ interface S2TableConfig {
   }
   meta?: Array<{ field: string; name?: string; formatter?: string }>
   isPivot?: boolean
+  not_supported?: boolean
   changes_made?: string
 }
 
@@ -47,11 +48,42 @@ function evalRule(rule: ConditionRule, value: any): boolean {
 function formatValue(value: any, formatter?: string): string {
   if (value === null || value === undefined) return '—'
   const num = Number(value)
-  if (formatter === 'currency' && !isNaN(num))
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(num)
-  if (formatter === 'percent' && !isNaN(num)) return `${(num * 100).toFixed(1)}%`
-  if (formatter === 'number' && !isNaN(num)) return num.toLocaleString()
-  return String(value)
+  const str = String(value)
+  switch (formatter) {
+    case 'currency':
+      return !isNaN(num)
+        ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(num)
+        : str
+    case 'percent':
+      return !isNaN(num) ? `${(num * 100).toFixed(1)}%` : str
+    case 'number':
+      return !isNaN(num) ? num.toLocaleString() : str
+    case 'compact': {
+      if (isNaN(num)) return str
+      const abs = Math.abs(num)
+      const sign = num < 0 ? '-' : ''
+      if (abs >= 1_000_000_000) return `${sign}${(abs / 1_000_000_000).toFixed(1)}B`
+      if (abs >= 1_000_000)     return `${sign}${(abs / 1_000_000).toFixed(1)}M`
+      if (abs >= 1_000)         return `${sign}${(abs / 1_000).toFixed(1)}K`
+      return num.toLocaleString()
+    }
+    case 'signed':
+      return !isNaN(num) ? (num > 0 ? `+${num.toLocaleString()}` : num.toLocaleString()) : str
+    case 'uppercase':
+      return str.toUpperCase()
+    case 'lowercase':
+      return str.toLowerCase()
+    case 'capitalize':
+      return str.replace(/\b\w/g, c => c.toUpperCase())
+    case 'date': {
+      const d = new Date(value)
+      return isNaN(d.getTime()) ? str : d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+    }
+    case 'boolean':
+      return value === true || str.toLowerCase() === 'true' || str === '1' ? 'Yes' : 'No'
+    default:
+      return str
+  }
 }
 
 export default function AntVS2Table({
@@ -67,6 +99,18 @@ export default function AntVS2Table({
   const [sortDir, setSortDir] = useState<'ASC' | 'DESC'>(
     tableConfig?.sortParams?.[0]?.sortMethod ?? 'ASC',
   )
+
+  // Sync sort state when tableConfig changes (e.g. after a chat agent update)
+  useEffect(() => {
+    const sp = tableConfig?.sortParams
+    if (!sp) return
+    if (sp.length > 0) {
+      setSortCol(sp[0].sortFieldId)
+      setSortDir(sp[0].sortMethod)
+    } else {
+      setSortCol(null)
+    }
+  }, [tableConfig])
 
   const hiddenSet = useMemo(() => new Set(tableConfig?.hiddenColumns ?? []), [tableConfig])
   const metaMap = useMemo(() => {

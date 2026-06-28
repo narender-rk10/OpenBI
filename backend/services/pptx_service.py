@@ -26,31 +26,46 @@ class PPTXService:
     # ── Presenton auth ─────────────────────────────────────────────────────────
 
     async def _presenton_ensure_session(self) -> "dict[str, str]":
-        """One-time setup + login. Caches and returns cookies for subsequent requests."""
+        """One-time setup + login. Caches and returns cookies for subsequent requests.
+
+        Retries on ConnectError/ConnectTimeout to tolerate Presenton still starting up
+        after a container restart (it takes ~30s for nginx+fastapi to be ready).
+        """
         if PPTXService._presenton_cookies is not None:
             return PPTXService._presenton_cookies
 
         creds = {"username": _PRESENTON_USER, "password": _PRESENTON_PASS}
-        async with httpx.AsyncClient(timeout=20) as client:
-            setup = await client.post(f"{_PRESENTON_URL}/api/v1/auth/setup", json=creds)
-            if setup.status_code not in (200, 201, 409):
-                logger.warning("Presenton auth/setup returned %d: %s", setup.status_code, setup.text[:200])
-
-            login = await client.post(f"{_PRESENTON_URL}/api/v1/auth/login", json=creds)
-            login.raise_for_status()
-
-        cookies = dict(login.cookies)
-        if not cookies:
+        last_exc: Exception = RuntimeError("Presenton not reachable")
+        for attempt in range(6):
             try:
-                body = login.json()
-                if token := (body.get("access_token") or body.get("token")):
-                    cookies = {"access_token": token}
-            except Exception:
-                pass
+                async with httpx.AsyncClient(timeout=20) as client:
+                    setup = await client.post(f"{_PRESENTON_URL}/api/v1/auth/setup", json=creds)
+                    if setup.status_code not in (200, 201, 409):
+                        logger.warning("Presenton auth/setup returned %d: %s", setup.status_code, setup.text[:200])
 
-        PPTXService._presenton_cookies = cookies
-        logger.info("Presenton session established (cookies: %s)", list(cookies.keys()))
-        return cookies
+                    login = await client.post(f"{_PRESENTON_URL}/api/v1/auth/login", json=creds)
+                    login.raise_for_status()
+
+                cookies = dict(login.cookies)
+                if not cookies:
+                    try:
+                        body = login.json()
+                        if token := (body.get("access_token") or body.get("token")):
+                            cookies = {"access_token": token}
+                    except Exception:
+                        pass
+
+                PPTXService._presenton_cookies = cookies
+                logger.info("Presenton session established (cookies: %s)", list(cookies.keys()))
+                return cookies
+
+            except (httpx.ConnectTimeout, httpx.ConnectError) as exc:
+                last_exc = exc
+                wait = 10 * (attempt + 1)
+                logger.warning("Presenton not ready (attempt %d/6), retrying in %ds: %s", attempt + 1, wait, exc)
+                await asyncio.sleep(wait)
+
+        raise last_exc
 
     async def _presenton_request(self, method: str, url: str, timeout: float = 30.0, **kwargs) -> httpx.Response:
         """Authenticated request to Presenton. Re-auths once on 401."""
@@ -65,14 +80,15 @@ class PPTXService:
 
     # ── shared helpers ─────────────────────────────────────────────────────────
 
-    async def _org_llm(self, db: AsyncIOMotorDatabase) -> tuple[str, str, str]:
-        """Return (provider, api_key, model)."""
+    async def _org_llm(self, db: AsyncIOMotorDatabase) -> tuple[str, str, str, str | None]:
+        """Return (provider, api_key, model, base_url)."""
         org = await db.organizations.find_one({})
         settings = org.get("settings", {}) if org else {}
         provider = settings.get("llm_provider", "openai")
         api_key = decrypt_api_key(settings.get("llm_api_key_encrypted", ""))
         model = settings.get("llm_model", "")
-        return provider, api_key, model
+        base_url = settings.get("llm_base_url")
+        return provider, api_key, model, base_url
 
     async def _dashboard_context(self, dashboard_id: str, db: AsyncIOMotorDatabase) -> dict:
         dashboard = await db.dashboards.find_one({"_id": ObjectId(dashboard_id)})
@@ -106,10 +122,20 @@ class PPTXService:
 
     _PRESENTON_CONFIG_PATH = "/app/presenton_data/userConfig.json"
 
-    _IMAGE_PROVIDER_MAP = {
-        "google": "gemini_flash",
-        "gemini": "gemini_flash",
-        "openai": "dall_e_3",
+    # OpenAI-compatible base URLs for providers Presenton doesn't support natively
+    _OPENAI_COMPAT_URLS: "dict[str, str]" = {
+        "groq": "https://api.groq.com/openai/v1",
+        "mistral": "https://api.mistral.ai/v1",
+    }
+
+    # Keys written for each provider — cleared when switching to avoid stale auth
+    _PROVIDER_KEYS: "dict[str, list[str]]" = {
+        "openai":    ["OPENAI_API_KEY", "OPENAI_MODEL"],
+        "google":    ["GOOGLE_API_KEY", "GOOGLE_MODEL"],
+        "anthropic": ["ANTHROPIC_API_KEY", "ANTHROPIC_MODEL"],
+        "deepseek":  ["DEEPSEEK_API_KEY", "DEEPSEEK_MODEL", "DEEPSEEK_BASE_URL"],
+        "ollama":    ["OLLAMA_MODEL", "OLLAMA_URL"],
+        "custom":    ["CUSTOM_LLM_URL", "CUSTOM_LLM_API_KEY", "CUSTOM_MODEL"],
     }
 
     def _configure_presenton_llm(
@@ -117,17 +143,17 @@ class PPTXService:
         provider: str,
         api_key: str,
         model: str,
+        base_url: str | None = None,
     ) -> None:
         """Write LLM + image config to the shared Presenton userConfig file.
 
         Presenton reads USER_CONFIG_PATH on every request; writing here before
         generate keeps Presenton's LLM in sync with OpenBI's settings.
+        Supports: openai, google/gemini, anthropic, deepseek, groq, mistral,
+        ollama, and any custom OpenAI-compatible endpoint (via base_url).
         """
-        if not api_key:
+        if not api_key and provider != "ollama":
             return
-
-        provider_map = {"gemini": "google", "google": "google", "openai": "openai", "anthropic": "anthropic"}
-        prov = provider_map.get(provider, "openai")
 
         try:
             existing: dict = {}
@@ -137,28 +163,71 @@ class PPTXService:
             except (FileNotFoundError, json.JSONDecodeError):
                 pass
 
-            existing["LLM"] = prov
             existing["DISABLE_IMAGE_GENERATION"] = False
-            if img_provider := self._IMAGE_PROVIDER_MAP.get(prov):
-                existing["IMAGE_PROVIDER"] = img_provider
 
-            if prov == "openai":
-                existing["OPENAI_API_KEY"] = api_key
-                if model:
-                    existing["OPENAI_MODEL"] = model
-            elif prov == "google":
-                existing["GOOGLE_API_KEY"] = api_key
-                if model:
-                    existing["GOOGLE_MODEL"] = model
-            elif prov == "anthropic":
-                existing["ANTHROPIC_API_KEY"] = api_key
-                if model:
-                    existing["ANTHROPIC_MODEL"] = model
+            # Determine the Presenton LLM key and image provider for this provider
+            if provider == "openai":
+                presenton_llm = "openai"
+                image_provider = "dall_e_3"
+                extra: dict = {"OPENAI_API_KEY": api_key}
+                if model: extra["OPENAI_MODEL"] = model
+
+            elif provider in ("google", "gemini"):
+                presenton_llm = "google"
+                image_provider = "gemini_flash"
+                extra = {"GOOGLE_API_KEY": api_key}
+                if model: extra["GOOGLE_MODEL"] = model
+
+            elif provider == "anthropic":
+                presenton_llm = "anthropic"
+                image_provider = "pexels"
+                extra = {"ANTHROPIC_API_KEY": api_key}
+                if model: extra["ANTHROPIC_MODEL"] = model
+
+            elif provider == "deepseek":
+                presenton_llm = "deepseek"
+                image_provider = "pexels"
+                extra = {"DEEPSEEK_API_KEY": api_key}
+                if model: extra["DEEPSEEK_MODEL"] = model
+                if base_url: extra["DEEPSEEK_BASE_URL"] = base_url
+
+            elif provider == "ollama":
+                presenton_llm = "ollama"
+                image_provider = "pexels"
+                extra = {}
+                if model: extra["OLLAMA_MODEL"] = model
+                if base_url: extra["OLLAMA_URL"] = base_url
+
+            else:
+                # Groq, Mistral, or any custom OpenAI-compatible provider
+                custom_url = base_url or self._OPENAI_COMPAT_URLS.get(provider)
+                if custom_url:
+                    presenton_llm = "custom"
+                    extra = {"CUSTOM_LLM_URL": custom_url, "CUSTOM_LLM_API_KEY": api_key}
+                    if model: extra["CUSTOM_MODEL"] = model
+                else:
+                    presenton_llm = "openai"
+                    extra = {"OPENAI_API_KEY": api_key}
+                    if model: extra["OPENAI_MODEL"] = model
+                image_provider = "pexels"
+
+            # Clear stale keys from all other providers before writing new ones
+            for keys in self._PROVIDER_KEYS.values():
+                for k in keys:
+                    existing.pop(k, None)
+
+            existing["LLM"] = presenton_llm
+            existing["DISABLE_IMAGE_GENERATION"] = False
+            existing["IMAGE_PROVIDER"] = image_provider
+            existing.update(extra)
 
             with open(self._PRESENTON_CONFIG_PATH, "w") as f:
                 json.dump(existing, f)
 
-            logger.info("Updated Presenton config (provider=%s, image=%s)", prov, existing.get("IMAGE_PROVIDER"))
+            logger.info(
+                "Updated Presenton config (openbi_provider=%s → presenton_llm=%s, image=%s)",
+                provider, existing["LLM"], existing.get("IMAGE_PROVIDER"),
+            )
         except Exception as exc:
             logger.warning("Could not write Presenton LLM config: %s", exc)
 
@@ -176,10 +245,10 @@ class PPTXService:
         by proxy/load-balancer read timeouts.
         """
         context = await self._dashboard_context(dashboard_id, db)
-        provider, api_key, model = await self._org_llm(db)
+        provider, api_key, model, base_url = await self._org_llm(db)
 
         # Push the in-app LLM config to Presenton before every generate call
-        self._configure_presenton_llm(provider, api_key, model)
+        self._configure_presenton_llm(provider, api_key, model, base_url)
 
         prompt = self._build_presenton_prompt(context, feedback)
         n_slides = min(len(context["widgets"]) + 2, 15)

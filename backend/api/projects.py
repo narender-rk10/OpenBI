@@ -55,6 +55,15 @@ async def create_project(
     mindsdb_name = f"proj_{uuid4().hex[:8]}"
     now = datetime.now(timezone.utc)
 
+    # Check name uniqueness against active projects only
+    existing = await db.projects.find_one({
+        "org_id": ObjectId(user["org_id"]),
+        "name": body.name,
+        "is_active": True,
+    })
+    if existing:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Project name already exists")
+
     # Create MindsDB project
     try:
         await mindsdb.create_project(mindsdb_name)
@@ -129,7 +138,7 @@ async def delete_project(
     user: dict = Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_db),
 ):
-    """Soft-delete project."""
+    """Delete project and all related MindsDB + MongoDB resources."""
     project = await db.projects.find_one({
         "_id": ObjectId(project_id),
         "org_id": ObjectId(user["org_id"]),
@@ -137,14 +146,48 @@ async def delete_project(
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
 
-    # Optionally delete from MindsDB
-    try:
-        await mindsdb.drop_project(project["mindsdb_project_name"])
-    except MindsDBError:
-        pass  # non-critical
+    pid = ObjectId(project_id)
+    mindsdb_project = project["mindsdb_project_name"]
 
-    await db.projects.update_one(
-        {"_id": ObjectId(project_id)},
-        {"$set": {"is_active": False, "updated_at": datetime.now(timezone.utc)}},
-    )
+    # 1. Drop MindsDB agents
+    agents = await db.agents.find({"project_id": pid}).to_list(200)
+    for agent in agents:
+        try:
+            await mindsdb.delete_agent(mindsdb_project, agent["mindsdb_agent_name"])
+        except MindsDBError:
+            pass
+
+    # 2. Drop MindsDB knowledge bases
+    kbs = await db.knowledge_bases.find({"project_id": pid}).to_list(200)
+    for kb in kbs:
+        try:
+            await mindsdb.delete_knowledge_base(mindsdb_project, kb["mindsdb_kb_name"])
+        except MindsDBError:
+            pass
+
+    # 3. Drop MindsDB connection databases (conn_*)
+    conns = await db.connections.find({"project_id": pid}).to_list(200)
+    for conn in conns:
+        db_name = conn.get("mindsdb_db_name")
+        if db_name:
+            try:
+                await mindsdb.delete_database(db_name)
+            except MindsDBError:
+                pass
+
+    # 4. Drop the MindsDB project itself
+    try:
+        await mindsdb.drop_project(mindsdb_project)
+    except MindsDBError:
+        pass
+
+    # 5. Delete all related MongoDB collections
+    await db.agents.delete_many({"project_id": pid})
+    await db.knowledge_bases.delete_many({"project_id": pid})
+    await db.connections.delete_many({"project_id": pid})
+    await db.dashboards.delete_many({"project_id": pid})
+    await db.chat_sessions.delete_many({"project_id": pid})
+    await db.schedules.delete_many({"project_id": pid})
+    await db.projects.delete_one({"_id": pid})
+
     return {"status": "deleted"}

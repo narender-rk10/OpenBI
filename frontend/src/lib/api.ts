@@ -19,16 +19,15 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-// Auto-logout on 401
+// Auto-logout on 401 — dispatch a custom event so AuthProvider can clear state
+// and let React Router redirect without a hard page reload (which kills Vite HMR).
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
       localStorage.removeItem('openbi_token')
       localStorage.removeItem('openbi_user')
-      if (window.location.pathname !== '/login' && window.location.pathname !== '/signup' && window.location.pathname !== '/') {
-        window.location.href = '/login'
-      }
+      window.dispatchEvent(new Event('openbi:unauthorized'))
     }
     return Promise.reject(error)
   }

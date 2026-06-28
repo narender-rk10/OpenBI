@@ -1,10 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect, useRef } from 'react'
-import { Filter, X, RotateCcw, Calendar, Search, ChevronDown, Plus, Check } from 'lucide-react'
+import { Filter, X, RotateCcw, Calendar, Search, ChevronDown, Plus, Check, Loader2 } from 'lucide-react'
 import type { DashboardFilter, Widget } from '../../lib/types'
+import api from '../../lib/api'
 
 interface DashboardFiltersProps {
   filters: DashboardFilter[]
+  projectId: string
+  dashboardId: string
   onFilterChange: (filterId: string, value: any) => void
   onResetAll: () => void
   onRemoveFilter?: (filterId: string) => void
@@ -18,12 +21,16 @@ function FilterDropdown({
   options,
   value,
   onChange,
+  onOpen,
+  loading = false,
   placeholder = 'All',
   multi = false,
 }: {
   options: string[]
   value: string | string[] | null
   onChange: (v: string | string[] | null) => void
+  onOpen?: () => void
+  loading?: boolean
   placeholder?: string
   multi?: boolean
 }) {
@@ -64,12 +71,14 @@ function FilterDropdown({
     <div ref={ref} className="relative">
       <button
         type="button"
-        onClick={() => setOpen(v => !v)}
+        onClick={() => { if (!open) onOpen?.(); setOpen(v => !v) }}
         className="flex items-center gap-1 text-xs font-medium outline-none cursor-pointer"
         style={{ color: 'var(--text-primary)' }}
       >
         <span className="max-w-[120px] truncate">{label}</span>
-        <ChevronDown className={`w-3 h-3 opacity-50 transition-transform shrink-0 ${open ? 'rotate-180' : ''}`} />
+        {loading
+          ? <Loader2 className="w-3 h-3 opacity-50 shrink-0 animate-spin" />
+          : <ChevronDown className={`w-3 h-3 opacity-50 transition-transform shrink-0 ${open ? 'rotate-180' : ''}`} />}
       </button>
 
       {open && (
@@ -81,37 +90,46 @@ function FilterDropdown({
             boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
           }}
         >
-          {/* Clear / All option */}
-          {!multi && (
-            <button
-              type="button"
-              onClick={() => { onChange(null); setOpen(false) }}
-              className="w-full flex items-center justify-between px-3 py-2 text-xs hover:bg-white/5 transition-colors border-b"
-              style={{ color: 'var(--text-muted)', borderColor: 'var(--border-color)' }}
-            >
-              <span>All</span>
-              {!selected && <Check className="w-3 h-3 text-[#e94560]" />}
-            </button>
-          )}
-          {options.map(opt => {
-            const isSelected = multi
-              ? (selected as string[]).includes(opt)
-              : selected === opt
-            return (
-              <button
-                key={opt}
-                type="button"
-                onClick={() => toggle(opt)}
-                className="w-full flex items-center justify-between px-3 py-2 text-xs transition-colors hover:bg-white/5"
-                style={{ color: isSelected ? '#e94560' : 'var(--text-primary)' }}
-              >
-                <span className="truncate text-left">{opt}</span>
-                {isSelected && <Check className="w-3 h-3 shrink-0 ml-2 text-[#e94560]" />}
-              </button>
-            )
-          })}
-          {options.length === 0 && (
-            <p className="px-3 py-2 text-xs" style={{ color: 'var(--text-muted)' }}>No options</p>
+          {loading ? (
+            <div className="flex items-center justify-center gap-2 px-3 py-3">
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-[#e94560]" />
+              <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Loading…</span>
+            </div>
+          ) : (
+            <>
+              {/* Clear / All option */}
+              {!multi && (
+                <button
+                  type="button"
+                  onClick={() => { onChange(null); setOpen(false) }}
+                  className="w-full flex items-center justify-between px-3 py-2 text-xs hover:bg-white/5 transition-colors border-b"
+                  style={{ color: 'var(--text-muted)', borderColor: 'var(--border-color)' }}
+                >
+                  <span>All</span>
+                  {!selected && <Check className="w-3 h-3 text-[#e94560]" />}
+                </button>
+              )}
+              {options.map(opt => {
+                const isSelected = multi
+                  ? (selected as string[]).includes(opt)
+                  : selected === opt
+                return (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => toggle(opt)}
+                    className="w-full flex items-center justify-between px-3 py-2 text-xs transition-colors hover:bg-white/5"
+                    style={{ color: isSelected ? '#e94560' : 'var(--text-primary)' }}
+                  >
+                    <span className="truncate text-left">{opt}</span>
+                    {isSelected && <Check className="w-3 h-3 shrink-0 ml-2 text-[#e94560]" />}
+                  </button>
+                )
+              })}
+              {options.length === 0 && (
+                <p className="px-3 py-2 text-xs" style={{ color: 'var(--text-muted)' }}>No options</p>
+              )}
+            </>
           )}
         </div>
       )}
@@ -122,6 +140,8 @@ function FilterDropdown({
 // ── Main component ─────────────────────────────────────────────────────────────
 export default function DashboardFilters({
   filters,
+  projectId,
+  dashboardId,
   onFilterChange,
   onResetAll,
   onRemoveFilter,
@@ -132,6 +152,23 @@ export default function DashboardFilters({
   const [localValues, setLocalValues] = useState<Record<string, any>>(() =>
     Object.fromEntries(filters.map(f => [f.id, f.current_value]))
   )
+  // Extra options loaded on-demand from backend (fallback when stored options are empty)
+  const [refreshedOptions, setRefreshedOptions] = useState<Record<string, string[]>>({})
+  const [loadingFilters, setLoadingFilters] = useState<Record<string, boolean>>({})
+
+  const handleDropdownOpen = async (filterId: string, currentOptions: string[]) => {
+    if (currentOptions.length > 0 || refreshedOptions[filterId]) return
+    setLoadingFilters(prev => ({ ...prev, [filterId]: true }))
+    try {
+      const { data } = await api.post(
+        `/api/projects/${projectId}/dashboards/${dashboardId}/filters/${filterId}/refresh-options`
+      )
+      if (data.options?.length) {
+        setRefreshedOptions(prev => ({ ...prev, [filterId]: data.options }))
+      }
+    } catch { /* best-effort */ }
+    finally { setLoadingFilters(prev => ({ ...prev, [filterId]: false })) }
+  }
 
   // Keep local state in sync when the filters prop changes (e.g. after a reset
   // or when the parent re-fetches the dashboard).
@@ -174,22 +211,30 @@ export default function DashboardFilters({
   }
 
   const getFilterOptions = (f: DashboardFilter): string[] => {
-    if (!widgets || widgets.length === 0) return (f.options as string[]) || []
+    // 1. Live widget cached data (most up-to-date; handles both array and object rows)
     const distinct = new Set<string>()
-    widgets.forEach(w => {
+    ;(widgets || []).forEach(w => {
       const data = w.cached_data
-      if (data && Array.isArray(data.columns) && Array.isArray(data.rows)) {
+      if (data && Array.isArray(data.columns)) {
         const idx = data.columns.findIndex(c => c.toLowerCase() === f.column.toLowerCase())
-        if (idx !== -1) {
+        if (idx !== -1 && Array.isArray(data.rows)) {
           data.rows.forEach(r => {
-            if (r && r[idx] !== null && r[idx] !== undefined && r[idx] !== '') {
-              distinct.add(String(r[idx]))
-            }
+            const v = Array.isArray(r) ? r[idx] : (r as any)?.[data.columns[idx]]
+            if (v !== null && v !== undefined && v !== '') distinct.add(String(v))
           })
         }
       }
     })
-    return distinct.size > 0 ? Array.from(distinct).sort() : ((f.options as string[]) || [])
+    if (distinct.size > 0) return Array.from(distinct).sort()
+
+    // 2. On-demand refreshed options fetched from backend
+    if (refreshedOptions[f.id]?.length) return refreshedOptions[f.id]
+
+    // 3. Options persisted in the dashboard document
+    const stored = f.options
+    if (Array.isArray(stored) && stored.length > 0) return stored as string[]
+
+    return []
   }
 
   return (
@@ -239,6 +284,8 @@ export default function DashboardFilters({
                   options={options}
                   value={currentValue ?? null}
                   onChange={v => handleChange(f.id, v)}
+                  onOpen={() => handleDropdownOpen(f.id, options)}
+                  loading={!!loadingFilters[f.id]}
                 />
               )}
 
@@ -248,6 +295,8 @@ export default function DashboardFilters({
                   options={options}
                   value={currentValue ?? []}
                   onChange={v => handleChange(f.id, v)}
+                  onOpen={() => handleDropdownOpen(f.id, options)}
+                  loading={!!loadingFilters[f.id]}
                   multi
                   placeholder="Any"
                 />

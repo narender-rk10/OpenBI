@@ -57,6 +57,7 @@ export default function ChatPage() {
   const { projectId } = useParams<{ projectId: string }>()
   const [agents, setAgents] = useState<Agent[]>([])
   const [sessions, setSessions] = useState<ChatSession[]>([])
+  const [pageLoading, setPageLoading] = useState(true)
   const [activeSession, setActiveSession] = useState<ChatSession | null>(null)
   const [selectedAgentId, setSelectedAgentId] = useState('')
   const [hasInput, setHasInput] = useState(false)  // only for send button enabled state
@@ -116,10 +117,10 @@ export default function ChatPage() {
     if (!projectId) return
     // Note: we intentionally do NOT default to the first agent. The active agent
     // is established by an @-mention, by LLM routing, or by an explicit pick.
-    api.get(`/api/projects/${projectId}/agents`).then(({ data }) => {
-      setAgents(data)
-    }).catch(() => {})
-    api.get(`/api/projects/${projectId}/chat/sessions`).then(({ data }) => setSessions(data)).catch(() => {})
+    Promise.all([
+      api.get(`/api/projects/${projectId}/agents`).then(({ data }) => setAgents(data)).catch(() => {}),
+      api.get(`/api/projects/${projectId}/chat/sessions`).then(({ data }) => setSessions(data)).catch(() => {}),
+    ]).finally(() => setPageLoading(false))
     api.get(`/api/projects/${projectId}/dashboards`).then(({ data }) => setDashboards(data)).catch(() => {})
   }, [projectId])
 
@@ -343,9 +344,11 @@ export default function ChatPage() {
           </button>
         </div>
         <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
-          {sessions.length === 0 && (
+          {pageLoading ? (
+            <div className="flex justify-center py-4"><Loader2 className="w-4 h-4 animate-spin" style={{ color: 'var(--text-muted)' }} /></div>
+          ) : sessions.length === 0 ? (
             <p className="text-xs text-center py-4" style={{ color: 'var(--text-muted)' }}>No chats yet</p>
-          )}
+          ) : null}
           {sessions.map(s => (
             <button
               key={s._id}
@@ -368,7 +371,7 @@ export default function ChatPage() {
             </div>
           ) : (
             <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-              {agents.length === 0 ? 'No agents' : 'Type @ to select'}
+              {pageLoading ? <Loader2 className="w-3 h-3 animate-spin inline" /> : agents.length === 0 ? 'No agents' : 'Type @ to select'}
             </p>
           )}
         </div>
@@ -399,7 +402,7 @@ export default function ChatPage() {
               <p className="text-sm max-w-xs" style={{ color: 'var(--text-secondary)' }}>
                 Ask anything in plain English. Type <code className="text-[#e94560] text-xs">@</code> to switch agents.
               </p>
-              {agents.length === 0 && (
+              {!pageLoading && agents.length === 0 && (
                 <p className="mt-4 text-xs px-4 py-2 rounded-lg bg-amber-500/10 text-amber-500">
                   ⚠ Create an agent first from the Agents tab
                 </p>
@@ -555,9 +558,9 @@ export default function ChatPage() {
               ref={inputRef}
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
-              placeholder={agents.length === 0 ? 'Create an agent first...' : 'Ask anything... type @ to switch agents'}
+              placeholder={pageLoading ? 'Loading...' : agents.length === 0 ? 'Create an agent first...' : 'Ask anything... type @ to switch agents'}
               rows={1}
-              disabled={agents.length === 0}
+              disabled={pageLoading || agents.length === 0}
               className="flex-1 px-4 py-2.5 rounded-xl border text-sm outline-none resize-none transition-all focus:ring-2 focus:ring-[#e94560]/30 focus:border-[#e94560]"
               style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border-color)', color: 'var(--text-primary)', maxHeight: '120px' }}
               onInput={e => {
@@ -568,7 +571,7 @@ export default function ChatPage() {
             />
             <button
               onClick={handleSend}
-              disabled={!hasInput || isLoading || routing || agents.length === 0}
+              disabled={!hasInput || isLoading || routing || pageLoading || agents.length === 0}
               className="w-10 h-10 rounded-xl bg-[#e94560] text-white flex items-center justify-center hover:bg-[#e94560]/90 transition-all disabled:opacity-50 shrink-0"
             >
               {(isLoading || routing) ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}

@@ -15,6 +15,7 @@ class TableAgent:
         current_config: dict,
         columns: list,
         sample_data: list,
+        history: list[dict] | None = None,
     ) -> dict:
         """Process a table formatting request and return updated S2 config."""
         # Convert row arrays to objects for the prompt
@@ -26,12 +27,19 @@ class TableAgent:
         else:
             sample_objects = sample_data[:5]
 
+        history_block = ""
+        if history:
+            turns = "\n".join(
+                f"{h['role'].upper()}: {h['content']}" for h in history[-8:]
+            )
+            history_block = f"\n\nPrevious conversation (use for context/memory):\n{turns}\n"
+
         prompt = TABLE_AGENT_SYSTEM_PROMPT.format(
             current_config=json.dumps(current_config),
             columns=json.dumps(columns),
             sample_data=json.dumps(sample_objects),
             user_message=user_message,
-        )
+        ) + history_block
 
         result = await call_llm(prompt)
         parsed = self._parse_json(result)
@@ -43,6 +51,7 @@ class TableAgent:
         parsed.setdefault("conditions", {"background": [], "text": []})
         parsed.setdefault("meta", [])
         parsed.setdefault("isPivot", False)
+        parsed.setdefault("not_supported", False)
         parsed.setdefault("changes_made", "Config updated")
 
         return parsed
