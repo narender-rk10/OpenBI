@@ -582,7 +582,7 @@ async def suggest_filters(
             if c not in samples:
                 samples[c] = [r[i] for r in rows[:5] if i < len(r)]
     if not samples:
-        return {"suggestions": []}
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="No widget data available. Refresh your widgets first so there is data to analyse.")
 
     existing = {f["column"].lower() for f in (await db.dashboards.find_one({"_id": ObjectId(dashboard_id)})).get("global_filters", [])}
 

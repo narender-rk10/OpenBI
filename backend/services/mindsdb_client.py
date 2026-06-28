@@ -210,6 +210,13 @@ class MindsDBClient:
         resp = await self._request("GET", "/api/databases", operation="list databases")
         return resp.json()
 
+    async def database_exists(self, name: str) -> bool:
+        try:
+            resp = await self.client.get(f"/api/databases/{name}", timeout=10.0)
+            return resp.status_code == 200
+        except Exception:
+            return False
+
     async def delete_database(self, name: str):
         await self._request(
             "DELETE", f"/api/databases/{name}", operation=f"delete database '{name}'"

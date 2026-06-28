@@ -5,9 +5,9 @@ import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 from backend.config import settings
 from backend.core.database import close_db, connect_db, create_indexes, get_db
@@ -15,6 +15,7 @@ from backend.core.security import hash_password
 from backend.services.mindsdb_client import mindsdb
 from backend.services.scheduler_service import start_scheduler, stop_scheduler
 
+from backend.api import deps as api_deps
 from backend.api import (
     auth,
     users,
@@ -77,17 +78,32 @@ app = FastAPI(
 )
 
 # ── CORS ──
+_cors_origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "*"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ── Static files (uploads) ──
+# ── Authenticated file serving (replaces unauthenticated StaticFiles) ──
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads")
+
+
+@app.get("/uploads/{file_path:path}")
+async def serve_upload(
+    file_path: str,
+    user: dict = Depends(api_deps.get_current_user),
+):
+    """Serve uploaded files — requires a valid JWT."""
+    full = os.path.realpath(os.path.join(settings.UPLOAD_DIR, file_path))
+    # Prevent path traversal
+    if not full.startswith(os.path.realpath(settings.UPLOAD_DIR)):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    if not os.path.isfile(full):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    return FileResponse(full)
 
 # ── Register routers ──
 app.include_router(health.router, prefix="/api", tags=["health"])

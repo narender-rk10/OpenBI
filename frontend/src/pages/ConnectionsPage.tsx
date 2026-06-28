@@ -124,6 +124,8 @@ export default function ConnectionsPage() {
       setSelectedSource(null)
       setFormValues({})
       setConnName('')
+      setTestResult(null)
+      setTestDetail('')
       setShowCatalog(false)
       fetchConnections()
     } catch (err: any) {
@@ -240,7 +242,7 @@ export default function ConnectionsPage() {
           )}
           <button
             id="add-connection-btn"
-            onClick={() => { setShowCatalog(!showCatalog); setSelectedSource(null) }}
+            onClick={() => { setShowCatalog(!showCatalog); setSelectedSource(null); setTestResult(null); setTestDetail('') }}
             className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#e94560] text-white text-sm font-semibold hover:bg-[#e94560]/90 transition-all hover:shadow-lg hover:shadow-[#e94560]/20 active:scale-95"
           >
             <Plus className="w-4 h-4" />
@@ -276,7 +278,7 @@ export default function ConnectionsPage() {
                 {sources.map((source) => (
                   <button
                     key={source.engine}
-                    onClick={() => { setSelectedSource(source); setConnName(source.name) }}
+                    onClick={() => { setSelectedSource(source); setConnName(source.name); setTestResult(null); setTestDetail('') }}
                     className="flex items-center gap-3 px-4 py-3 rounded-lg border text-left text-sm font-medium transition-all hover:border-[#e94560]/50 hover:bg-[#e94560]/5"
                     style={{ borderColor: 'var(--border-color)', color: 'var(--text-primary)' }}
                   >
@@ -300,7 +302,7 @@ export default function ConnectionsPage() {
                 Connect to {selectedSource.name}
               </h2>
             </div>
-            <button type="button" onClick={() => setSelectedSource(null)} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-white/5" style={{ color: 'var(--text-muted)' }}>
+            <button type="button" onClick={() => { setSelectedSource(null); setTestResult(null); setTestDetail('') }} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-white/5" style={{ color: 'var(--text-muted)' }}>
               <X className="w-4 h-4" />
             </button>
           </div>

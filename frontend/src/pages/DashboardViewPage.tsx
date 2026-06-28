@@ -101,14 +101,17 @@ export default function DashboardViewPage() {
   const [addingFilter, setAddingFilter] = useState(false)
   const [filterSuggestions, setFilterSuggestions] = useState<{ column: string; type: string; reason?: string }[]>([])
   const [suggestingFilters, setSuggestingFilters] = useState(false)
+  const [suggestError, setSuggestError] = useState<string | null>(null)
 
   const handleSuggestFilters = async () => {
     setSuggestingFilters(true)
+    setSuggestError(null)
+    setFilterSuggestions([])
     try {
       const { data } = await api.post(`/api/projects/${projectId}/dashboards/${dashboardId}/suggest-filters`)
       setFilterSuggestions(data.suggestions || [])
-    } catch {
-      setFilterSuggestions([])
+    } catch (err: any) {
+      setSuggestError(err.response?.data?.detail || 'Could not suggest filters.')
     } finally {
       setSuggestingFilters(false)
     }
@@ -926,6 +929,9 @@ export default function DashboardViewPage() {
                     ? <><Loader2 className="w-3 h-3 animate-spin" /> Analyzing data…</>
                     : <><Sparkles className="w-3 h-3" /> Suggest filters from data</>}
                 </button>
+                {suggestError && (
+                  <p className="mt-1.5 text-xs" style={{ color: 'var(--text-muted)' }}>{suggestError}</p>
+                )}
                 {filterSuggestions.length > 0 && (
                   <div className="mt-2 space-y-1">
                     {filterSuggestions.map(s => (

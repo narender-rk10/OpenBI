@@ -1,5 +1,6 @@
 """Data source connection routes — CRUD, test, table listing."""
 
+import json
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -9,6 +10,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic import BaseModel
 
 from backend.api.deps import get_current_project, get_current_user, get_db
+from backend.core.security import encrypt_api_key
 from backend.services.mindsdb_client import MindsDBError, mindsdb
 
 router = APIRouter(prefix="/api/projects/{project_id}/connections")
@@ -81,7 +83,7 @@ async def create_connection(
     except MindsDBError:
         pass
 
-    # Store in MongoDB WITHOUT password/credentials
+    # Store safe params (no password) for display, plus encrypted full params for MindsDB recovery
     safe_params = {k: v for k, v in body.parameters.items() if k not in ("password", "api_key", "credentials", "secret")}
 
     conn_doc = {
@@ -91,6 +93,7 @@ async def create_connection(
         "category": body.category,
         "mindsdb_db_name": mindsdb_db_name,
         "connection_params": safe_params,
+        "connection_params_encrypted": encrypt_api_key(json.dumps(body.parameters)),
         "status": "connected",
         "tables": tables,
         "last_synced_at": datetime.now(timezone.utc),
@@ -193,6 +196,8 @@ async def detect_filters(
         )
     except MindsDBError as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=e.message)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
 
     columns = result.get("column_names", [])
     rows = result.get("data", [])
@@ -202,8 +207,11 @@ async def detect_filters(
 
     org_settings = await get_org_settings()
     lida = LIDAService(org_settings)
-    filters = await lida.detect_filters(columns, rows)
-    chart_suggestion = await lida.suggest_chart(columns, rows)
+    try:
+        filters = await lida.detect_filters(columns, rows)
+        chart_suggestion = await lida.suggest_chart(columns, rows)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Analysis failed: {e}")
     return {"filters": filters, "chart_suggestion": chart_suggestion, "row_count": len(rows)}
 
 

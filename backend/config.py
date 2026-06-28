@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     # App
     APP_URL: str = "http://localhost:3000"
 
+    # CORS — comma-separated list of allowed origins (no wildcards in production)
+    CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
+
     # Fernet
     FERNET_KEY: str = ""
 

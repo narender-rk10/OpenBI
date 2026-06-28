@@ -1,5 +1,6 @@
 """Agent CRUD routes — create with skills, update, delete."""
 
+import json
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -13,6 +14,15 @@ from backend.core.security import decrypt_api_key, encrypt_api_key
 from backend.services.mindsdb_client import MindsDBError, mindsdb
 
 router = APIRouter(prefix="/api/projects/{project_id}/agents")
+
+# MindsDB 26.x agents use pydantic-ai directly.  The model dict's "provider"
+# field must match the pydantic-ai provider name, which differs from MindsDB's
+# ML engine names for some providers (e.g. Gemini uses "google", not "gemini").
+MINDSDB_PROVIDER_MAP = {
+    "gemini": "google",
+    "openai": "openai",
+    "anthropic": "anthropic",
+}
 
 
 class SkillConfig(BaseModel):
@@ -40,14 +50,6 @@ class AgentUpdate(BaseModel):
     model_config_data: dict | None = None
 
 
-# Same mapping the resync flow uses; "gemini" → "google" for MindsDB.
-MINDSDB_PROVIDER_MAP = {
-    "gemini": "google",
-    "openai": "openai",
-    "anthropic": "anthropic",
-}
-
-
 async def _build_mindsdb_agent_config(
     db: AsyncIOMotorDatabase,
     project_id: str,
@@ -57,9 +59,11 @@ async def _build_mindsdb_agent_config(
     prompt_template: str,
     model_cfg_input: dict | None,
 ) -> tuple[dict, list[dict]]:
-    """Resolves connections/KBs/tables for a list of skills, builds the MindsDB
-    agent payload, and returns (agent_config, skill_docs_for_mongo).
-    Engine-agnostic — works for any MindsDB-supported data source."""
+    """Resolves connections/KBs/tables for a list of skills and builds the
+    MindsDB 26.x agent payload.  MindsDB 26.x uses pydantic-ai directly so the
+    model field must be a provider config dict (not a pre-created MindsDB model).
+
+    Returns (agent_config, skill_docs_for_mongo)."""
     skill_docs: list[dict] = []
     agent_tables: list[str] = []
     agent_kbs: list[str] = []
@@ -75,6 +79,24 @@ async def _build_mindsdb_agent_config(
                     detail=f"Connection {skill.connection_id} not found",
                 )
             db_name = conn["mindsdb_db_name"]
+
+            # Auto-recover MindsDB database if lost (e.g., container restart wiped state)
+            if not await mindsdb.database_exists(db_name):
+                if conn.get("connection_params_encrypted"):
+                    try:
+                        full_params = json.loads(decrypt_api_key(conn["connection_params_encrypted"]))
+                        await mindsdb.create_database(db_name, conn["engine"], full_params)
+                    except MindsDBError as e:
+                        raise HTTPException(
+                            status_code=status.HTTP_502_BAD_GATEWAY,
+                            detail=f"Failed to restore MindsDB database for '{conn['name']}': {e.message}",
+                        )
+                else:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail=f"MindsDB database for connection '{conn['name']}' is missing. Delete and recreate the connection to fix this.",
+                    )
+
             tables = skill.tables or conn.get("tables", [])
             if tables:
                 for t in tables:
@@ -109,7 +131,6 @@ async def _build_mindsdb_agent_config(
         org_settings.get("llm_api_key_encrypted", "")
     )
 
-    # No silent defaults — every value must come from MongoDB (or per-agent override).
     missing = [
         label for label, val in
         (("provider", provider), ("model", model_name), ("API key", api_key))
@@ -124,15 +145,20 @@ async def _build_mindsdb_agent_config(
             ),
         )
 
+    # MindsDB 26.x agents use pydantic-ai provider names.
+    # "gemini" → "google" so pydantic-ai picks up the GoogleModel class.
+    mindsdb_provider = MINDSDB_PROVIDER_MAP.get(provider, provider)
+
     agent_config: dict = {
         "name": name,
         "model": {
-            "provider": MINDSDB_PROVIDER_MAP.get(provider, provider),
+            "provider": mindsdb_provider,
             "model_name": model_name,
             "api_key": api_key,
         },
-        "params": {"memory": True, "model_name": model_name},
-        "prompt_template": prompt_template,
+        "params": {
+            "prompt_template": prompt_template,
+        },
     }
 
     data: dict = {}
@@ -141,7 +167,7 @@ async def _build_mindsdb_agent_config(
     if agent_kbs:
         data["knowledge_bases"] = agent_kbs
     if data:
-        agent_config["data"] = data
+        agent_config["params"]["data"] = data
 
     return agent_config, skill_docs
 
@@ -151,7 +177,6 @@ def _serialize(a: dict) -> dict:
     a["_id"] = str(a["_id"])
     a["project_id"] = str(a["project_id"])
     a["created_by"] = str(a["created_by"])
-    # Serialize ObjectIds inside nested skill docs (from older records)
     if "skills" in a and isinstance(a["skills"], list):
         serialized_skills = []
         for s in a["skills"]:
@@ -184,7 +209,6 @@ async def create_agent(
 ):
     project = await get_current_project(project_id, user, db)
 
-    # Check name uniqueness before doing anything
     existing = await db.agents.find_one({"name": body.name, "project_id": ObjectId(project_id)})
     if existing:
         raise HTTPException(
@@ -195,7 +219,6 @@ async def create_agent(
     mindsdb_agent_name = f"agent_{uuid4().hex[:8]}"
     mindsdb_project = project["mindsdb_project_name"]
 
-    # Ensure project exists in MindsDB (survives container rebuilds)
     await mindsdb.ensure_project(mindsdb_project)
 
     agent_config, skill_docs = await _build_mindsdb_agent_config(
@@ -213,7 +236,6 @@ async def create_agent(
     except MindsDBError as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=e.message)
 
-    # Save to MongoDB
     model_cfg = body.model_config_data or {}
     if model_cfg.get("api_key"):
         model_cfg["api_key_encrypted"] = encrypt_api_key(model_cfg.pop("api_key"))
@@ -239,7 +261,10 @@ async def create_agent(
             await mindsdb.delete_agent(mindsdb_project, mindsdb_agent_name)
         except MindsDBError:
             pass
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"An agent named '{body.name}' already exists in this project")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"An agent named '{body.name}' already exists in this project",
+        )
 
     agent_doc["_id"] = result.inserted_id
     return _serialize(agent_doc)
@@ -278,8 +303,6 @@ async def update_agent(
     if body.icon is not None:
         update["icon"] = body.icon
 
-    # Decide whether the MindsDB agent itself needs updating. Skills, prompt and
-    # model are baked into MindsDB; description/icon are Mongo-only metadata.
     needs_mindsdb_sync = (
         body.prompt_template is not None
         or body.skills is not None
@@ -288,17 +311,14 @@ async def update_agent(
 
     if needs_mindsdb_sync:
         prompt_template = body.prompt_template if body.prompt_template is not None else agent.get("prompt_template", "")
-        # Re-hydrate skills (Pydantic models) from either the request or the stored doc.
         if body.skills is not None:
             skills = body.skills
         else:
             skills = [SkillConfig(**s) for s in agent.get("skills", [])]
 
-        # Merge model overrides on top of the stored model config so partial PUTs work.
         merged_model_cfg = {**(agent.get("model_config") or {})}
         if body.model_config_data:
             merged_model_cfg.update(body.model_config_data)
-        # The stored encrypted key needs decrypting before being passed downstream.
         if merged_model_cfg.get("api_key_encrypted") and not merged_model_cfg.get("api_key"):
             merged_model_cfg["api_key"] = decrypt_api_key(merged_model_cfg["api_key_encrypted"])
 
@@ -349,7 +369,6 @@ async def delete_agent(
     if not agent:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
 
-    # Delete from MindsDB (best-effort — Mongo state is the source of truth here).
     try:
         await mindsdb.delete_agent(project["mindsdb_project_name"], agent["mindsdb_agent_name"])
     except MindsDBError:

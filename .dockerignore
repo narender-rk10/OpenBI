@@ -3,3 +3,15 @@ dist
 .git
 *.log
 .DS_Store
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+graphify-out/
+tests/
+*.md
+.env*
+scripts/
+seed/
+frontend/node_modules
+frontend/dist

@@ -73,7 +73,7 @@ export default function ChatPage() {
   const [routing, setRouting] = useState(false)
   const [agentPicker, setAgentPicker] = useState<{ message: string; reason?: string } | null>(null)
 
-  const { showApiError } = useErrorModal()
+  useErrorModal()
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -444,7 +444,6 @@ export default function ChatPage() {
                   <>
                     {/* Message text — always strip markdown from assistant answers */}
                     {(() => {
-                      const hasData = !!(msg.data && msg.data.columns.length > 0)
                       const displayContent = msg.role === 'assistant' ? stripMarkdown(msg.content) : msg.content
                       if (!displayContent) return null
                       return (

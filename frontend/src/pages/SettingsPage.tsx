@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import {
   Save, Key, Palette, Loader2, Users, MessageCircle,
   Copy, CheckCircle2, UserPlus, Fingerprint, Eye, EyeOff,
-  RefreshCw, AlertTriangle, Activity, Trash2, Mail
+  RefreshCw, AlertTriangle, Trash2, Mail
 } from 'lucide-react'
 import api from '../lib/api'
 import type { OrgSettings } from '../lib/types'

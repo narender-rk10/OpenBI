@@ -106,16 +106,29 @@ export default function WidgetEditorDrawer({ isOpen, onClose, widget, projectId,
       }
 
       let updatedChartConfig = widget.chart_config || null
-      if (updatedChartConfig) {
+      if (xAxis || yAxis || colorAxis) {
+        updatedChartConfig = {
+          ...(updatedChartConfig || {}),
+          g2_spec: {
+            ...((updatedChartConfig?.g2_spec) || {}),
+            encode: {
+              ...((updatedChartConfig?.g2_spec?.encode) || {}),
+              x: xAxis || undefined,
+              y: yAxis || undefined,
+              color: colorAxis || undefined,
+            }
+          }
+        }
+      } else if (updatedChartConfig) {
         updatedChartConfig = {
           ...updatedChartConfig,
           g2_spec: {
             ...(updatedChartConfig.g2_spec || {}),
             encode: {
               ...(updatedChartConfig.g2_spec?.encode || {}),
-              x: xAxis || undefined,
-              y: yAxis || undefined,
-              color: colorAxis || undefined,
+              x: undefined,
+              y: undefined,
+              color: undefined,
             }
           }
         }

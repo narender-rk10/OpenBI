@@ -1,10 +1,11 @@
 """Auth routes — signup, login, invite, profile, telegram linking."""
 
+from collections import defaultdict
 from datetime import datetime, timezone
 from uuid import uuid4
 
 from bson import ObjectId
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic import BaseModel, EmailStr
 
@@ -16,6 +17,34 @@ from backend.core.security import (
 )
 
 router = APIRouter()
+
+# ── In-process login rate limiter ────────────────────────────────────────────
+# Tracks failed attempts per IP. 10 failures in 5 min → 429 for 5 min.
+_login_fail: dict[str, list[float]] = defaultdict(list)
+_MAX_FAILS = 10
+_WINDOW = 300.0  # seconds
+
+
+def _check_login_rate(request: Request) -> None:
+    ip = request.client.host if request.client else "unknown"
+    now = datetime.now(timezone.utc).timestamp()
+    _login_fail[ip] = [t for t in _login_fail[ip] if now - t < _WINDOW]
+    if len(_login_fail[ip]) >= _MAX_FAILS:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed login attempts. Try again in 5 minutes.",
+            headers={"Retry-After": "300"},
+        )
+
+
+def _record_fail(request: Request) -> None:
+    ip = request.client.host if request.client else "unknown"
+    _login_fail[ip].append(datetime.now(timezone.utc).timestamp())
+
+
+def _clear_fail(request: Request) -> None:
+    ip = request.client.host if request.client else "unknown"
+    _login_fail.pop(ip, None)
 
 
 # ── Request / Response schemas ──────────────────────────────────────────
@@ -47,6 +76,11 @@ class TelegramLinkRequest(BaseModel):
     telegram_id: str
     api_key: str
     telegram_username: str | None = None
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────
@@ -121,13 +155,16 @@ async def signup(body: SignupRequest, db: AsyncIOMotorDatabase = Depends(get_db)
 
 
 @router.post("/login")
-async def login(body: LoginRequest, db: AsyncIOMotorDatabase = Depends(get_db)):
+async def login(request: Request, body: LoginRequest, db: AsyncIOMotorDatabase = Depends(get_db)):
     """Authenticate and return JWT."""
+    _check_login_rate(request)
     user = await db.users.find_one({"email": body.email})
     if not user or not verify_password(body.password, user["password_hash"]):
+        _record_fail(request)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
     if not user.get("is_active", True):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is deactivated")
+    _clear_fail(request)
 
     await db.users.update_one(
         {"_id": user["_id"]},
@@ -201,6 +238,23 @@ async def update_me(
     await db.users.update_one({"_id": ObjectId(user["_id"])}, {"$set": update})
     updated = await db.users.find_one({"_id": ObjectId(user["_id"])})
     return {"user": _serialize_user(updated)}
+
+
+@router.patch("/password")
+async def change_password(
+    body: ChangePasswordRequest,
+    user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Change current user's password."""
+    db_user = await db.users.find_one({"_id": ObjectId(user["_id"])})
+    if not db_user or not verify_password(body.current_password, db_user["password_hash"]):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Current password is incorrect")
+    await db.users.update_one(
+        {"_id": ObjectId(user["_id"])},
+        {"$set": {"password_hash": hash_password(body.new_password), "updated_at": datetime.now(timezone.utc)}},
+    )
+    return {"detail": "Password updated successfully"}
 
 
 # ── Telegram Auth ───────────────────────────────────────────────────────

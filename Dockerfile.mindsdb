@@ -61,3 +61,34 @@ RUN KB_LLM_CLIENT="$(find / -path '*/mindsdb/interfaces/knowledge_base/llm_clien
     && sed -i 's/@run_in_batches(1000)/@run_in_batches(int(os.getenv("KB_EMBED_BATCH_SIZE", "50")))/' "$KB_LLM_CLIENT" \
     && grep -q 'KB_EMBED_BATCH_SIZE' "$KB_LLM_CLIENT" \
     && echo "Patched KB embed batch size -> KB_EMBED_BATCH_SIZE (default 100) in $KB_LLM_CLIENT"
+
+# MindsDB 26.x check_agent_llm makes a live API call ("Say 'hi'") at agent
+# creation time to validate the LLM.  This causes agent creation to fail on
+# rate-limited or quota-exceeded API keys.  Patch ALL copies of the file so
+# the function body is replaced with 'pass'; real errors surface at chat time.
+RUN python3 - <<'PYEOF'
+import re, pathlib
+
+pattern = re.compile(
+    r'(def check_agent_llm\(llm_params\):)\n    [^\n]+\n    [^\n]+\n    [^\n]+',
+    re.MULTILINE,
+)
+replacement = r'\1\n    pass  # patched: skip live API call at creation time'
+
+patched = 0
+for p in pathlib.Path('/').rglob('pydantic_ai_agent.py'):
+    try:
+        src = p.read_text()
+        if 'check_agent_llm' not in src:
+            continue
+        out = pattern.sub(replacement, src)
+        if out != src:
+            p.write_text(out)
+            print(f'Patched: {p}')
+            patched += 1
+        else:
+            print(f'No match (already patched or different format): {p}')
+    except Exception as e:
+        print(f'Skip {p}: {e}')
+print(f'Total patched: {patched}')
+PYEOF
