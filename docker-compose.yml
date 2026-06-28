@@ -118,8 +118,8 @@ services:
       POSTGRES_DB: financedb
       POSTGRES_USER: financeuser
       POSTGRES_PASSWORD: Finance@123
-    expose:
-      - "5432"
+    ports:
+      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./seed/demo_finance_pg.sql:/docker-entrypoint-initdb.d/demo_finance_pg.sql:ro
@@ -143,8 +143,8 @@ services:
       MYSQL_DATABASE: marketingdb
       MYSQL_USER: marketinguser
       MYSQL_PASSWORD: Marketing@123
-    expose:
-      - "3306"
+    ports:
+      - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
       - ./seed/demo_marketing_mysql.sql:/sql-seed/demo_marketing_mysql.sql:ro

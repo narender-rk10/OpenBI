@@ -31,7 +31,36 @@ const PROVIDER_MODELS: Record<string, { id: string; label: string; tier: string 
     { id: 'claude-sonnet-4-6',         label: 'Claude Sonnet 4.6', tier: 'Balanced' },
     { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5',  tier: 'Fast · Cheap' },
   ],
+  groq: [
+    { id: 'llama-3.3-70b-versatile',  label: 'Llama 3.3 70B',    tier: 'Flagship · Fast' },
+    { id: 'llama-3.1-8b-instant',     label: 'Llama 3.1 8B',     tier: 'Ultra Fast' },
+    { id: 'gemma2-9b-it',             label: 'Gemma2 9B',         tier: 'Fast' },
+    { id: 'mixtral-8x7b-32768',       label: 'Mixtral 8x7B',      tier: 'Balanced' },
+  ],
+  mistral: [
+    { id: 'mistral-large-latest',  label: 'Mistral Large',  tier: 'Flagship' },
+    { id: 'mistral-small-latest',  label: 'Mistral Small',  tier: 'Fast · Cheap' },
+    { id: 'open-mistral-7b',       label: 'Mistral 7B',     tier: 'Open · Fast' },
+    { id: 'codestral-latest',      label: 'Codestral',      tier: 'Code' },
+  ],
+  deepseek: [
+    { id: 'deepseek-chat',      label: 'DeepSeek Chat (V3)',    tier: 'Flagship' },
+    { id: 'deepseek-reasoner',  label: 'DeepSeek Reasoner (R1)', tier: 'Reasoning' },
+  ],
+  ollama: [
+    { id: 'llama3.2',   label: 'Llama 3.2',   tier: 'Local' },
+    { id: 'llama3.1',   label: 'Llama 3.1',   tier: 'Local' },
+    { id: 'mistral',    label: 'Mistral 7B',  tier: 'Local' },
+    { id: 'gemma2',     label: 'Gemma 2',     tier: 'Local' },
+    { id: 'qwen2.5',    label: 'Qwen 2.5',    tier: 'Local' },
+  ],
 }
+
+// Providers that don't need an API key
+const NO_KEY_PROVIDERS = new Set(['ollama'])
+// Providers that need a base URL field
+const NEEDS_BASE_URL = new Set(['ollama'])
+
 const CUSTOM_ID = '__custom__'
 
 export default function SettingsPage() {
@@ -56,6 +85,7 @@ export default function SettingsPage() {
   const [model, setModel] = useState('')         // dropdown value (or CUSTOM_ID)
   const [customModel, setCustomModel] = useState('') // free-text when model === CUSTOM_ID
   const [apiKey, setApiKey] = useState('')
+  const [baseUrl, setBaseUrl] = useState('')
   const [showApiKey, setShowApiKey] = useState(false)
   const [llmResyncResult, setLlmResyncResult] = useState<{
     agents_synced: number
@@ -178,8 +208,10 @@ export default function SettingsPage() {
         provider,
         model: resolvedModel,
         ...(apiKey ? { api_key: apiKey } : {}),
+        ...(baseUrl ? { base_url: baseUrl } : {}),
       })
       setApiKey('')
+      setBaseUrl('')
       // Only show the resync banner when the key actually changed
       if (data.kbs_need_recreate !== undefined && (apiKey || data.kbs_need_recreate.length)) {
         setLlmResyncResult({
@@ -474,6 +506,10 @@ export default function SettingsPage() {
                   <option value="gemini">Google Gemini</option>
                   <option value="openai">OpenAI</option>
                   <option value="anthropic">Anthropic Claude</option>
+                  <option value="groq">Groq (Llama · Gemma · Mixtral)</option>
+                  <option value="mistral">Mistral AI</option>
+                  <option value="deepseek">DeepSeek</option>
+                  <option value="ollama">Ollama (local)</option>
                 </select>
               </div>
 
@@ -505,33 +541,57 @@ export default function SettingsPage() {
                 )}
               </div>
 
+              {/* Base URL — shown only for Ollama (or any custom OpenAI-compatible endpoint) */}
+              {NEEDS_BASE_URL.has(provider) && (
+                <div>
+                  <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-primary)' }}>
+                    Base URL
+                  </label>
+                  <input
+                    type="text"
+                    value={baseUrl}
+                    onChange={(e) => setBaseUrl(e.target.value)}
+                    placeholder="http://localhost:11434/v1"
+                    className="w-full px-4 py-2.5 rounded-lg border text-sm outline-none font-mono"
+                    style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border-color)', color: 'var(--text-primary)' }}
+                  />
+                  <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+                    Ollama default: <span className="font-mono">http://localhost:11434/v1</span>. Change if running on another host.
+                  </p>
+                </div>
+              )}
+
               <div>
                 <div className="flex items-center justify-between mb-1.5">
-                  <label className="block text-sm font-medium" style={{ color: 'var(--text-primary)' }}>API Key</label>
-                  {settings?.settings.llm_api_key_masked && (
+                  <label className="block text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                    API Key{NO_KEY_PROVIDERS.has(provider) ? <span className="ml-1 text-xs font-normal opacity-60">(not required)</span> : ''}
+                  </label>
+                  {settings?.settings.llm_api_key_masked && !NO_KEY_PROVIDERS.has(provider) && (
                     <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>
                       Current: {settings.settings.llm_api_key_masked}
                     </span>
                   )}
                 </div>
-                <div className="relative">
-                  <input
-                    type={showApiKey ? "text" : "password"}
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    placeholder="Enter new API key to update..."
-                    className="w-full pl-4 pr-10 py-2.5 rounded-lg border text-sm outline-none"
-                    style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border-color)', color: 'var(--text-primary)' }}
-                  />
-                  <button 
-                    type="button" 
-                    onClick={() => setShowApiKey(!showApiKey)}
-                    className="absolute right-3 top-3" 
-                    style={{ color: 'var(--text-muted)' }}
-                  >
-                    {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
+                {!NO_KEY_PROVIDERS.has(provider) && (
+                  <div className="relative">
+                    <input
+                      type={showApiKey ? "text" : "password"}
+                      value={apiKey}
+                      onChange={(e) => setApiKey(e.target.value)}
+                      placeholder="Enter new API key to update..."
+                      className="w-full pl-4 pr-10 py-2.5 rounded-lg border text-sm outline-none"
+                      style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border-color)', color: 'var(--text-primary)' }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowApiKey(!showApiKey)}
+                      className="absolute right-3 top-3"
+                      style={{ color: 'var(--text-muted)' }}
+                    >
+                      {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                )}
               </div>
 
               <button

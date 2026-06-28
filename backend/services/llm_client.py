@@ -42,6 +42,15 @@ async def call_llm(prompt: str, org_settings: dict | None = None, system_prompt:
         return await _call_openai(prompt, model, api_key, system_prompt)
     elif provider == "anthropic":
         return await _call_anthropic(prompt, model, api_key, system_prompt)
+    elif provider == "groq":
+        return await _call_openai_compatible(prompt, model, api_key, system_prompt, "https://api.groq.com/openai/v1")
+    elif provider == "mistral":
+        return await _call_openai_compatible(prompt, model, api_key, system_prompt, "https://api.mistral.ai/v1")
+    elif provider == "deepseek":
+        return await _call_openai_compatible(prompt, model, api_key, system_prompt, "https://api.deepseek.com/v1")
+    elif provider == "ollama":
+        base_url = org_settings.get("llm_base_url") or "http://localhost:11434/v1"
+        return await _call_openai_compatible(prompt, model, api_key or "ollama", system_prompt, base_url)
     else:
         raise ValueError(f"Unknown LLM provider: {provider}")
 
@@ -69,6 +78,23 @@ async def _call_openai(prompt: str, model: str, api_key: str, system_prompt: str
     async with httpx.AsyncClient(timeout=60.0) as client:
         resp = await client.post(
             "https://api.openai.com/v1/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}"},
+            json={"model": model, "messages": messages, "temperature": 0.1},
+        )
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"]
+
+
+async def _call_openai_compatible(prompt: str, model: str, api_key: str, system_prompt: str | None, base_url: str) -> str:
+    """Call any OpenAI-compatible API (Groq, Mistral, Ollama, etc.)."""
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        resp = await client.post(
+            f"{base_url.rstrip('/')}/chat/completions",
             headers={"Authorization": f"Bearer {api_key}"},
             json={"model": model, "messages": messages, "temperature": 0.1},
         )

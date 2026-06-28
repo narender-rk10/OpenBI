@@ -123,6 +123,7 @@ class LLMSettingsUpdate(BaseModel):
     provider: str
     model: str
     api_key: str | None = None
+    base_url: str | None = None  # for Ollama / OpenAI-compatible endpoints
 
 
 class BrandingUpdate(BaseModel):
@@ -192,6 +193,8 @@ async def update_llm_settings(
     }
     if body.api_key:
         update["settings.llm_api_key_encrypted"] = encrypt_api_key(body.api_key)
+    if body.base_url is not None:
+        update["settings.llm_base_url"] = body.base_url
 
     org_id = ObjectId(user["org_id"])
     await db.organizations.update_one({"_id": org_id}, {"$set": update})

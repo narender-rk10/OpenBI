@@ -22,6 +22,16 @@ MINDSDB_PROVIDER_MAP = {
     "gemini": "google",
     "openai": "openai",
     "anthropic": "anthropic",
+    "groq": "groq",
+    "mistral": "mistral",
+    "ollama": "ollama",
+    # DeepSeek has no native pydantic-ai provider — route through OpenAI-compatible
+    "deepseek": "openai",
+}
+
+# Providers that need an explicit base_url when routed through pydantic-ai's OpenAI provider
+_OPENAI_COMPAT_BASE_URLS: dict[str, str] = {
+    "deepseek": "https://api.deepseek.com/v1",
 }
 
 
@@ -130,12 +140,18 @@ async def _build_mindsdb_agent_config(
     api_key = model_cfg_input.get("api_key") or decrypt_api_key(
         org_settings.get("llm_api_key_encrypted", "")
     )
+    base_url = model_cfg_input.get("base_url") or org_settings.get("llm_base_url")
 
+    # Ollama runs locally — no API key required
+    _key_optional_providers = {"ollama"}
     missing = [
         label for label, val in
-        (("provider", provider), ("model", model_name), ("API key", api_key))
+        (("provider", provider), ("model", model_name))
         if not val
-    ]
+    ] + (
+        [] if (provider in _key_optional_providers or api_key)
+        else ["API key"]
+    )
     if missing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -149,13 +165,21 @@ async def _build_mindsdb_agent_config(
     # "gemini" → "google" so pydantic-ai picks up the GoogleModel class.
     mindsdb_provider = MINDSDB_PROVIDER_MAP.get(provider, provider)
 
+    model_dict: dict = {
+        "provider": mindsdb_provider,
+        "model_name": model_name,
+        "api_key": api_key or "ollama",
+    }
+    # Resolve base_url: explicit setting > provider default > ollama fallback
+    resolved_base_url = base_url or _OPENAI_COMPAT_BASE_URLS.get(provider)
+    if not resolved_base_url and provider == "ollama":
+        resolved_base_url = "http://localhost:11434/v1"
+    if resolved_base_url:
+        model_dict["base_url"] = resolved_base_url
+
     agent_config: dict = {
         "name": name,
-        "model": {
-            "provider": mindsdb_provider,
-            "model_name": model_name,
-            "api_key": api_key,
-        },
+        "model": model_dict,
         "params": {
             "prompt_template": prompt_template,
         },
