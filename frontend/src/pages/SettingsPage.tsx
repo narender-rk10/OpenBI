@@ -44,7 +44,9 @@ const PROVIDER_MODELS: Record<string, { id: string; label: string; tier: string 
     { id: 'codestral-latest',      label: 'Codestral',      tier: 'Code' },
   ],
   deepseek: [
-    { id: 'deepseek-chat',      label: 'DeepSeek Chat (V3)',    tier: 'Flagship' },
+    { id: 'deepseek-v4-pro',    label: 'DeepSeek V4 Pro',       tier: 'Flagship' },
+    { id: 'deepseek-v4-flash',  label: 'DeepSeek V4 Flash',     tier: 'Fast · Balanced' },
+    { id: 'deepseek-chat',      label: 'DeepSeek Chat (V3)',    tier: 'Previous gen' },
     { id: 'deepseek-reasoner',  label: 'DeepSeek Reasoner (R1)', tier: 'Reasoning' },
   ],
   ollama: [

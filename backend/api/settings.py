@@ -57,8 +57,28 @@ async def _resync_agents_with_new_key(
         display_name = agent.get("name") or mindsdb_agent_name
 
         try:
-            skills = [SkillConfig(**s) for s in agent.get("skills", [])]
-            # Force the new org-wide key/provider/model onto this rebuild.
+            # Ensure the MindsDB project exists (lost on container restart).
+            await mindsdb.ensure_project(mindsdb_project)
+
+            # Build config — skip skills whose connection/KB no longer exists.
+            raw_skills = agent.get("skills", [])
+            valid_skills: list[SkillConfig] = []
+            skipped_skills: list[str] = []
+            for s in raw_skills:
+                if s.get("type") == "text2sql" and s.get("connection_id"):
+                    from bson import ObjectId as _ObjId
+                    conn_exists = await db.connections.find_one({"_id": _ObjId(s["connection_id"])})
+                    if not conn_exists:
+                        skipped_skills.append(s.get("mindsdb_db_name") or s["connection_id"])
+                        continue
+                elif s.get("type") == "knowledge_base" and s.get("kb_id"):
+                    from bson import ObjectId as _ObjId
+                    kb_exists = await db.knowledge_bases.find_one({"_id": _ObjId(s["kb_id"])})
+                    if not kb_exists:
+                        skipped_skills.append(s.get("mindsdb_kb_name") or s["kb_id"])
+                        continue
+                valid_skills.append(SkillConfig(**s))
+
             model_cfg_input = {
                 "provider": provider,
                 "model_name": model,
@@ -69,14 +89,21 @@ async def _resync_agents_with_new_key(
                 project_id=str(agent["project_id"]),
                 mindsdb_project=mindsdb_project,
                 name=mindsdb_agent_name,
-                skills=skills,
+                skills=valid_skills,
                 prompt_template=agent.get("prompt_template", ""),
                 model_cfg_input=model_cfg_input,
             )
-            await mindsdb.update_agent(mindsdb_project, mindsdb_agent_name, agent_config)
 
-            # Mirror the new (non-secret) model config back into Mongo so future
-            # per-agent updates merge on top of the current state, not a stale one.
+            # Try update first; fall back to create if the agent was lost from MindsDB.
+            try:
+                await mindsdb.update_agent(mindsdb_project, mindsdb_agent_name, agent_config)
+            except MindsDBError as upd_err:
+                _msg = upd_err.message.lower()
+                if "not allowed" in _msg or "does not exist" in _msg or "not found" in _msg:
+                    await mindsdb.create_agent(mindsdb_project, agent_config)
+                else:
+                    raise
+
             stored_model_cfg = {
                 **(agent.get("model_config") or {}),
                 "provider": provider,
@@ -89,6 +116,8 @@ async def _resync_agents_with_new_key(
                 {"$set": {"model_config": stored_model_cfg, "updated_at": datetime.now(timezone.utc)}},
             )
             synced += 1
+            if skipped_skills:
+                logger.warning("Agent %s: skipped missing skills %s", display_name, skipped_skills)
         except MindsDBError as e:
             logger.error("Resync failed for agent %s: %s", display_name, e.message)
             failed.append({"name": display_name, "error": e.message})
