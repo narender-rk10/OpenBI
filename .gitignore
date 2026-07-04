@@ -55,6 +55,8 @@ frontend/.vite/
 *.pem
 *.key
 credentials.json
+CREDENTIALS.md
+DEMO_SETUP_CHEATSHEET.txt
 
 # IDEs and OS
 .vscode/

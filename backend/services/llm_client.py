@@ -36,7 +36,7 @@ async def call_llm(prompt: str, org_settings: dict | None = None, system_prompt:
             f"LLM API key for provider '{provider}' not configured. Set it in Settings → LLM."
         )
 
-    if provider == "gemini":
+    if provider in ("gemini", "google"):
         return await _call_gemini(prompt, model, api_key, system_prompt)
     elif provider == "openai":
         return await _call_openai(prompt, model, api_key, system_prompt)

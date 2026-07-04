@@ -172,6 +172,25 @@ export default function ChatPage() {
     setMessages(msgs)
     setAiSummaries({})
     setSummaryLoadingIds(new Set())
+
+    // For messages with data but no stored chart_config (e.g. created via API),
+    // generate chart configs in parallel — UI is immediately responsive, charts appear as they arrive.
+    msgs
+      .filter((m: any) => m.role === 'assistant' && m.data?.columns?.length > 0 && !m.chart_config)
+      .forEach(async (m: any) => {
+        const msgId = m.id || m._id
+        try {
+          const resp = await api.post(
+            `/api/projects/${projectId}/chat/sessions/${s._id}/chart`,
+            { message_id: msgId }
+          )
+          if (resp.data?.chart_config) {
+            setMessages(prev => prev.map(pm =>
+              pm.id === msgId ? { ...pm, chart_config: resp.data.chart_config } : pm
+            ))
+          }
+        } catch { /* chart generation is optional */ }
+      })
   }
 
   const startNew = () => {

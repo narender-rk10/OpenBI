@@ -491,6 +491,9 @@ async def _handle_non_streaming(
                 )
                 if sql_match:
                     sql_query = sql_match.group(1).strip()
+                # Some MindsDB versions send the final answer inside a context event
+                if not answer_text and event_data.get("text"):
+                    answer_text = event_data["text"]
             elif evt_type == "data":
                 answer_text = event_data.get("text", "") or event_data.get("content", "")
                 if "query" in event_data:
@@ -503,6 +506,14 @@ async def _handle_non_streaming(
 
     except MindsDBError as e:
         answer_text = f"Error: {e.message}"
+
+    # Fallback: if streaming returned nothing, use the SQL agent path
+    if not answer_text:
+        try:
+            result = await mindsdb.chat_with_agent(mindsdb_project, mindsdb_agent, history)
+            answer_text = result.get("answer", "")
+        except MindsDBError:
+            pass
 
     # Re-execute SQL for clean structured data
     if sql_query:

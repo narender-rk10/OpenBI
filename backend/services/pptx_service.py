@@ -13,7 +13,7 @@ from backend.core.security import decrypt_api_key
 
 logger = logging.getLogger(__name__)
 
-_PRESENTON_URL = "http://presenton:80"
+_PRESENTON_URL = os.getenv("PRESENTON_URL", "http://presenton:80")
 _PRESENTON_USER = os.getenv("PRESENTON_USERNAME", "openbi")
 _PRESENTON_PASS = os.getenv("PRESENTON_PASSWORD", "openbi_pptx_2024")
 
@@ -38,12 +38,17 @@ class PPTXService:
         last_exc: Exception = RuntimeError("Presenton not reachable")
         for attempt in range(6):
             try:
-                async with httpx.AsyncClient(timeout=20) as client:
+                async with httpx.AsyncClient(timeout=20, verify=False) as client:
                     setup = await client.post(f"{_PRESENTON_URL}/api/v1/auth/setup", json=creds)
                     if setup.status_code not in (200, 201, 409):
                         logger.warning("Presenton auth/setup returned %d: %s", setup.status_code, setup.text[:200])
 
                     login = await client.post(f"{_PRESENTON_URL}/api/v1/auth/login", json=creds)
+                    # Auth may be disabled — treat 404/422 as "no auth needed"
+                    if login.status_code in (404, 422):
+                        logger.info("Presenton auth disabled (status %d), proceeding without cookies", login.status_code)
+                        PPTXService._presenton_cookies = {}
+                        return {}
                     login.raise_for_status()
 
                 cookies = dict(login.cookies)
@@ -55,6 +60,7 @@ class PPTXService:
                     except Exception:
                         pass
 
+                # Empty cookies is fine when Presenton auth is disabled
                 PPTXService._presenton_cookies = cookies
                 logger.info("Presenton session established (cookies: %s)", list(cookies.keys()))
                 return cookies
@@ -70,7 +76,7 @@ class PPTXService:
     async def _presenton_request(self, method: str, url: str, timeout: float = 30.0, **kwargs) -> httpx.Response:
         """Authenticated request to Presenton. Re-auths once on 401."""
         cookies = await self._presenton_ensure_session()
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        async with httpx.AsyncClient(timeout=timeout, verify=False) as client:
             resp = await client.request(method, url, cookies=cookies, **kwargs)
             if resp.status_code == 401:
                 PPTXService._presenton_cookies = None
@@ -156,6 +162,7 @@ class PPTXService:
             return
 
         try:
+            os.makedirs(os.path.dirname(self._PRESENTON_CONFIG_PATH), exist_ok=True)
             existing: dict = {}
             try:
                 with open(self._PRESENTON_CONFIG_PATH) as f:
@@ -251,7 +258,7 @@ class PPTXService:
         self._configure_presenton_llm(provider, api_key, model, base_url)
 
         prompt = self._build_presenton_prompt(context, feedback)
-        n_slides = min(len(context["widgets"]) + 2, 15)
+        n_slides = min(len(context["widgets"]) + 2, 8)
 
         resp = await self._presenton_request(
             "POST",
@@ -327,22 +334,17 @@ class PPTXService:
 
     async def presenton_download(self, presentation_id: str, download_path: str = "") -> bytes:
         """Download PPTX bytes from Presenton for a previously generated presentation."""
-        # Static /app_data paths are served unauthenticated
-        candidates: list[tuple[str, bool]] = []
+        candidates: list[str] = []
         if download_path:
-            candidates.append((f"{_PRESENTON_URL}{download_path}", False))
+            candidates.append(f"{_PRESENTON_URL}{download_path}")
         candidates += [
-            (f"{_PRESENTON_URL}/api/v1/ppt/presentation/{presentation_id}/export", True),
-            (f"{_PRESENTON_URL}/api/v1/ppt/presentation/{presentation_id}/download", True),
+            f"{_PRESENTON_URL}/api/v1/ppt/presentation/{presentation_id}/export",
+            f"{_PRESENTON_URL}/api/v1/ppt/presentation/{presentation_id}/download",
         ]
 
-        for url, needs_auth in candidates:
+        for url in candidates:
             try:
-                if needs_auth:
-                    r = await self._presenton_request("GET", url, timeout=60.0)
-                else:
-                    async with httpx.AsyncClient(timeout=60) as client:
-                        r = await client.get(url)
+                r = await self._presenton_request("GET", url, timeout=60.0)
                 if r.status_code == 200 and r.content:
                     return r.content
             except Exception:
@@ -421,9 +423,17 @@ async def run_presenton_job(job_id: str, db: AsyncIOMotorDatabase) -> None:
                     "edit_path": result["edit_path"],
                     "download_path": result["download_path"],
                 })
-                # Mirror into pptx_presentations so the download endpoint still works
-                if not await db.pptx_presentations.find_one({"presentation_id": pid}):
-                    await db.pptx_presentations.insert_one({
+                # Cache PPTX bytes immediately — Presenton is ephemeral, restarts lose files
+                pptx_bytes = None
+                try:
+                    pptx_bytes = await pptx_service.presenton_download(pid, result["download_path"])
+                    logger.info("Cached %d bytes for presentation %s", len(pptx_bytes), pid)
+                except Exception as cache_err:
+                    logger.warning("Could not cache PPTX bytes for %s: %s", pid, cache_err)
+
+                existing = await db.pptx_presentations.find_one({"presentation_id": pid})
+                if not existing:
+                    rec = {
                         "dashboard_id": doc["dashboard_id"],
                         "project_id": doc["project_id"],
                         "user_id": doc["user_id"],
@@ -432,7 +442,15 @@ async def run_presenton_job(job_id: str, db: AsyncIOMotorDatabase) -> None:
                         "download_path": result["download_path"],
                         "feedback": doc.get("feedback"),
                         "created_at": _now(),
-                    })
+                    }
+                    if pptx_bytes:
+                        rec["pptx_bytes"] = pptx_bytes
+                    await db.pptx_presentations.insert_one(rec)
+                elif pptx_bytes and not existing.get("pptx_bytes"):
+                    await db.pptx_presentations.update_one(
+                        {"presentation_id": pid},
+                        {"$set": {"pptx_bytes": pptx_bytes}},
+                    )
                 logger.info("pptx job %s completed: presentation %s", job_id, pid)
                 return
 

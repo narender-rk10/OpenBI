@@ -10,7 +10,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic import BaseModel
 
 from backend.api.deps import get_current_project, get_current_user, get_db
-from backend.core.security import encrypt_api_key
+from backend.core.security import decrypt_api_key, encrypt_api_key
 from backend.services.mindsdb_client import MindsDBError, mindsdb
 
 router = APIRouter(prefix="/api/projects/{project_id}/connections")
@@ -139,7 +139,22 @@ async def list_tables(
     if not conn:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Connection not found")
 
-    tables = await mindsdb.list_tables(conn["mindsdb_db_name"])
+    db_name = conn["mindsdb_db_name"]
+
+    # Auto-recover MindsDB database if lost on container restart
+    if not await mindsdb.database_exists(db_name):
+        if conn.get("connection_params_encrypted"):
+            try:
+                full_params = json.loads(decrypt_api_key(conn["connection_params_encrypted"]))
+                await mindsdb.create_database(db_name, conn["engine"], full_params)
+            except MindsDBError as e:
+                raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
+                                    detail=f"Failed to restore connection '{conn['name']}': {e.message}")
+        else:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                                detail=f"MindsDB database for '{conn['name']}' is missing and cannot be restored.")
+
+    tables = await mindsdb.list_tables(db_name)
     table_names = [t.get("name", t) if isinstance(t, dict) else str(t) for t in tables] if isinstance(tables, list) else []
 
     await db.connections.update_one(

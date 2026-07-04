@@ -13,5 +13,15 @@ tests/
 .env*
 scripts/
 seed/
+!seed/pg-init/
+!seed/mysql-init/
+!seed/demo_finance_pg.sql
+!seed/postgres-retail.sql
+!seed/demo_marketing_mysql.sql
+!seed/mysql-hr.sql
 frontend/node_modules
 frontend/dist
+*.pptx
+*.ppt
+docker/
+!docker/mindsdb-with-dbs/

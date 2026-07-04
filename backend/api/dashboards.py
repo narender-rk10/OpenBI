@@ -829,7 +829,8 @@ async def _classify_widget_intent(message: str, current_type: str, org) -> str:
         "Reply with exactly ONE word: keep  OR  chart  OR  table"
     )
     try:
-        result = (await call_llm(prompt, org)).strip().lower()
+        org_settings = org.get("settings", {}) if org else {}
+        result = (await call_llm(prompt, org_settings)).strip().lower()
         if "chart" in result:
             return "chart"
         if "table" in result:
@@ -977,7 +978,7 @@ async def dashboard_chat(
                     "3. Output a single valid SQL query.\n\n"
                     "Modified SQL Query:"
                 )
-                new_query_raw = await call_llm(prompt, org)
+                new_query_raw = await call_llm(prompt, org.get("settings", {}) if org else {})
                 new_query = new_query_raw.strip().replace("```sql", "").replace("```", "").strip()
 
                 result = await mindsdb.sql_query(new_query)
@@ -1025,11 +1026,16 @@ async def dashboard_chat(
     use_table = (target_type == "table")
 
     if use_table:
-        current_config = widget.get("table_config") or {}
-        new_config = await table_agent.process(
-            body.message, current_config, data.get("columns", []), data.get("rows", []),
-            history=widget_history,
-        )
+        try:
+            current_config = widget.get("table_config") or {}
+            new_config = await table_agent.process(
+                body.message, current_config, data.get("columns", []), data.get("rows", []),
+                history=widget_history,
+            )
+        except Exception as e:
+            import logging as _log
+            _log.getLogger(__name__).error("Table agent error: %s", e)
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
         await db.widgets.update_one(
             {"_id": widget["_id"]},
             {
@@ -1050,17 +1056,22 @@ async def dashboard_chat(
             new_config.get("changes_made", "Table updated"),
         )
     else:
-        current_config = widget.get("chart_config")
-        if current_config:
-            new_config = await chart_agent.modify_chart(
-                body.message, current_config, data.get("columns", []), data.get("rows", []),
-                brand_colors, history=widget_history,
-            )
-        else:
-            new_config = await chart_agent.generate_chart(
-                data.get("columns", []), data.get("rows", []), body.message, brand_colors,
-                history=widget_history,
-            )
+        try:
+            current_config = widget.get("chart_config")
+            if current_config:
+                new_config = await chart_agent.modify_chart(
+                    body.message, current_config, data.get("columns", []), data.get("rows", []),
+                    brand_colors, history=widget_history,
+                )
+            else:
+                new_config = await chart_agent.generate_chart(
+                    data.get("columns", []), data.get("rows", []), body.message, brand_colors,
+                    history=widget_history,
+                )
+        except Exception as e:
+            import logging as _log
+            _log.getLogger(__name__).error("Chart agent error: %s", e)
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
         await db.widgets.update_one(
             {"_id": widget["_id"]},
             {
@@ -1401,20 +1412,21 @@ async def download_pptx_presenton(
     user: dict = Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_db),
 ):
-    """Proxy PPTX download from Presenton."""
+    """Proxy PPTX download from Presenton. Falls back to MongoDB cache if Presenton is unavailable."""
     from backend.services.pptx_service import pptx_service
     from fastapi.responses import Response as FastResponse
 
-    # Resolve download_path from MongoDB if not supplied by caller
-    if not download_path:
-        doc = await db.pptx_presentations.find_one({"presentation_id": presentation_id})
-        if doc:
-            download_path = doc.get("download_path", "")
-
-    try:
-        pptx_bytes = await pptx_service.presenton_download(presentation_id, download_path)
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
+    # Serve from MongoDB cache first (survives Presenton restarts)
+    pres_doc = await db.pptx_presentations.find_one({"presentation_id": presentation_id})
+    if pres_doc and pres_doc.get("pptx_bytes"):
+        pptx_bytes = bytes(pres_doc["pptx_bytes"])
+    else:
+        # Fall back to fetching live from Presenton
+        resolved_path = download_path or (pres_doc.get("download_path", "") if pres_doc else "")
+        try:
+            pptx_bytes = await pptx_service.presenton_download(presentation_id, resolved_path)
+        except Exception as e:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
 
     dashboard = await db.dashboards.find_one({"_id": ObjectId(dashboard_id)})
     name = dashboard["name"].replace(" ", "_") if dashboard else "presentation"

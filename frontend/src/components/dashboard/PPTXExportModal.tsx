@@ -1,11 +1,21 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useRef, useState } from 'react'
 import {
-  X, FileSliders, Loader2, Sparkles, ExternalLink,
+  X, FileSliders, Loader2, Sparkles, Download, ExternalLink,
   AlertTriangle, Clock, CheckCircle, XCircle,
 } from 'lucide-react'
 
-const PRESENTON_DIRECT = import.meta.env.VITE_PRESENTON_URL ?? 'http://localhost:7771'
+function getPresentonUrl(): string {
+  const host = window.location.hostname
+  if (host === 'localhost' || host === '127.0.0.1') {
+    return import.meta.env.VITE_PRESENTON_URL ?? 'http://localhost:7771'
+  }
+  const parts = host.split('.')
+  parts[0] = 'presenton'
+  return `https://${parts.join('.')}`
+}
+const PRESENTON_BASE = getPresentonUrl()
+
 const POLL_MS = 5_000
 
 function getToken() { return localStorage.getItem('openbi_token') || '' }
@@ -14,7 +24,9 @@ interface PptxJob {
   job_id: string
   status: 'queued' | 'processing' | 'completed' | 'failed'
   feedback: string | null
+  presentation_id: string | null
   edit_path: string | null
+  download_path: string | null
   error: string | null
   created_at: string
 }
@@ -46,10 +58,27 @@ const STATUS_META = {
   failed:     { label: 'Failed',       cls: 'text-rose-500 bg-rose-500/10',                      Icon: XCircle },
 } as const
 
-function JobRow({ job, dashboardName }: { job: PptxJob; dashboardName: string }) {
+function JobRow({ job, dashboardName, base }: { job: PptxJob; dashboardName: string; base: string }) {
   const meta = STATUS_META[job.status] ?? STATUS_META.queued
   const { Icon, label, cls } = meta
-  const openUrl = job.edit_path ? `${PRESENTON_DIRECT}${job.edit_path}` : null
+  const editUrl = job.edit_path ? `${PRESENTON_BASE}${job.edit_path}` : null
+
+  const downloadPptx = async () => {
+    if (!job.presentation_id) return
+    try {
+      const resp = await fetch(`${base}/${job.presentation_id}/download`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      })
+      if (!resp.ok) { alert('Download failed'); return }
+      const blob = await resp.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${dashboardName}.pptx`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch { alert('Download failed') }
+  }
 
   return (
     <div
@@ -72,16 +101,30 @@ function JobRow({ job, dashboardName }: { job: PptxJob; dashboardName: string })
         </p>
       </div>
 
-      {/* Action */}
-      {job.status === 'completed' && openUrl && (
-        <a
-          href={openUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#e94560] text-white text-[11px] font-semibold hover:bg-[#e94560]/90 transition-all shrink-0"
-        >
-          <ExternalLink className="w-3 h-3" /> Open
-        </a>
+      {/* Actions */}
+      {job.status === 'completed' && (
+        <div className="flex items-center gap-1.5 shrink-0">
+          {editUrl && (
+            <a
+              href={editUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1 px-2 py-1.5 rounded-lg border text-[11px] font-semibold transition-all hover:bg-white/5"
+              style={{ borderColor: 'var(--border-color)', color: 'var(--text-secondary)' }}
+              title="Opens Presenton editor — login: openbi / openbi_pptx_2024"
+            >
+              <ExternalLink className="w-3 h-3" /> Edit
+            </a>
+          )}
+          {job.presentation_id && (
+            <button
+              onClick={downloadPptx}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#e94560] text-white text-[11px] font-semibold hover:bg-[#e94560]/90 transition-all"
+            >
+              <Download className="w-3 h-3" /> Download
+            </button>
+          )}
+        </div>
       )}
       {job.status === 'failed' && job.error && (
         <span
@@ -158,7 +201,9 @@ export default function PPTXExportModal({
         job_id,
         status: 'queued',
         feedback: instructions.trim() || null,
+        presentation_id: null,
         edit_path: null,
+        download_path: null,
         error: null,
         created_at: new Date().toISOString(),
       }, ...prev])
@@ -260,8 +305,8 @@ export default function PPTXExportModal({
             </p>
           ) : (
             <div className="p-3 space-y-2">
-              {jobs.map(job => (
-                <JobRow key={job.job_id} job={job} dashboardName={dashboardName} />
+              {jobs.filter(j => j.status !== 'failed').map(job => (
+                <JobRow key={job.job_id} job={job} dashboardName={dashboardName} base={base} />
               ))}
             </div>
           )}
